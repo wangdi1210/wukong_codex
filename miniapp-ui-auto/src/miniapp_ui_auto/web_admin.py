@@ -667,7 +667,7 @@ _INDEX_HTML = """<!doctype html>
       document.getElementById('formExpected').value = '';
     }
     function splitLines(value) { return value.split(/\\n+/).map(item => item.replace(/^\\s*\\d+[.、)]\\s*/, '').trim()).filter(Boolean); }
-    function jsArg(value) { return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+    function jsArg(value) { return String(value).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\'"); }
     function caseIdFrom(title) {
       const now = new Date();
       const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
