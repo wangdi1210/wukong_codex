@@ -636,14 +636,20 @@ _INDEX_HTML = """<!doctype html>
 
     async function api(path, options) {
       const response = await fetch(path, options);
-      const data = await response.json();
+      const raw = await response.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (error) {
+        throw new Error(raw || response.statusText);
+      }
       if (!response.ok) throw new Error(data.error || response.statusText);
       return data;
     }
     function switchTab(tab) {
       document.querySelectorAll('.nav button').forEach(item => item.classList.toggle('active', item.dataset.tab === tab));
       document.querySelectorAll('.tab-page').forEach(item => item.classList.toggle('active', item.id === tab));
-      if (tab === 'reports') loadReport();
+      if (tab === 'reports') loadReport().catch(error => toast(`加载报告失败：${error.message}`));
     }
     function toast(message) {
       const el = document.getElementById('toast');
@@ -668,6 +674,18 @@ _INDEX_HTML = """<!doctype html>
     }
     function splitLines(value) { return value.split(/\\n+/).map(item => item.replace(/^\\s*\\d+[.、)]\\s*/, '').trim()).filter(Boolean); }
     function jsArg(value) { return String(value).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\'"); }
+    function escapeHtml(value) {
+      const el = document.createElement('div');
+      el.textContent = value == null ? '' : String(value);
+      return el.innerHTML;
+    }
+    function escapeAttr(value) { return escapeHtml(value).replace(/"/g, '&quot;'); }
+    function showActionError(action, error) {
+      const message = `${action}失败：${error.message || error}`;
+      toast(message);
+      const log = document.getElementById('runLog');
+      if (log) log.textContent = message;
+    }
     function caseIdFrom(title) {
       const now = new Date();
       const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
@@ -684,51 +702,70 @@ _INDEX_HTML = """<!doctype html>
       }
       const text = [...splitLines(document.getElementById('formPreconditions').value).map(item => `前置条件 ${item}`), ...steps, ...expected.map(item => `断言 ${item}`)].join('。');
       const payload = { case_id: editingCaseId || caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest' };
-      if (editingCaseId) {
-        await api(`/api/cases/${encodeURIComponent(editingCaseId)}`, { method: 'PUT', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
-      } else {
-        await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+      try {
+        if (editingCaseId) {
+          await api(`/api/cases/${encodeURIComponent(editingCaseId)}`, { method: 'PUT', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+        } else {
+          await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+        }
+        closeModal();
+        toast(editingCaseId ? '用例已更新' : '用例已保存');
+        editingCaseId = '';
+        await loadCases();
+      } catch (error) {
+        showActionError('保存用例', error);
       }
-      closeModal();
-      toast(editingCaseId ? '用例已更新' : '用例已保存');
-      editingCaseId = '';
-      await loadCases();
     }
     async function editCase(id) {
-      const data = await api(`/api/cases/${encodeURIComponent(id)}`);
-      editingCaseId = id;
-      document.getElementById('modalTitle').textContent = '编辑用例';
-      document.getElementById('formTitle').value = data.title || '';
-      document.getElementById('formModule').value = data.module || '';
-      document.getElementById('formPriority').value = data.priority || 'P2';
-      document.getElementById('formPreconditions').value = (data.preconditions || []).join('\\n');
-      document.getElementById('formSteps').value = data.natural_steps || '';
-      document.getElementById('formExpected').value = data.natural_expected || '';
-      document.getElementById('modalMask').classList.add('show');
+      try {
+        const data = await api(`/api/cases/${encodeURIComponent(id)}`);
+        editingCaseId = id;
+        document.getElementById('modalTitle').textContent = '编辑用例';
+        document.getElementById('formTitle').value = data.title || '';
+        document.getElementById('formModule').value = data.module || '';
+        document.getElementById('formPriority').value = data.priority || 'P2';
+        document.getElementById('formPreconditions').value = (data.preconditions || []).join('\\n');
+        document.getElementById('formSteps').value = data.natural_steps || '';
+        document.getElementById('formExpected').value = data.natural_expected || '';
+        document.getElementById('modalMask').classList.add('show');
+      } catch (error) {
+        showActionError('打开编辑弹窗', error);
+      }
     }
     async function deleteCase(id) {
       if (!confirm(`确认删除用例 ${id}？删除后会移除对应 YAML 文件。`)) {
         return;
       }
-      await api(`/api/cases/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      selectedIds.delete(id);
-      toast('用例已删除');
-      await loadCases();
+      try {
+        await api(`/api/cases/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        selectedIds.delete(id);
+        toast('用例已删除');
+        await loadCases();
+      } catch (error) {
+        showActionError('删除用例', error);
+      }
     }
     async function loadCases() {
-      const data = await api('/api/cases');
-      allCases = data.cases;
-      if (selectedIds.size === 0) {
-        allCases.forEach(item => selectedIds.add(item.id));
+      try {
+        const data = await api('/api/cases');
+        allCases = data.cases;
+        const validIds = new Set(allCases.map(item => item.id));
+        selectedIds = new Set([...selectedIds].filter(id => validIds.has(id)));
+        if (selectedIds.size === 0) {
+          allCases.forEach(item => selectedIds.add(item.id));
+        }
+        fillModuleFilter();
+        renderCaseTable();
+        renderMetrics();
+      } catch (error) {
+        document.getElementById('caseRows').innerHTML = `<tr><td colspan="8" class="empty">加载用例失败：${escapeHtml(error.message)}</td></tr>`;
+        toast(`加载用例失败：${error.message}`);
       }
-      fillModuleFilter();
-      renderCaseTable();
-      renderMetrics();
     }
     function fillModuleFilter() {
       const current = document.getElementById('moduleFilter').value;
       const modules = [...new Set(allCases.map(item => item.module))].sort();
-      document.getElementById('moduleFilter').innerHTML = '<option value="">全部模块</option>' + modules.map(item => `<option>${item}</option>`).join('');
+      document.getElementById('moduleFilter').innerHTML = '<option value="">全部模块</option>' + modules.map(item => `<option value="${escapeAttr(item)}">${escapeHtml(item)}</option>`).join('');
       document.getElementById('moduleFilter').value = current;
     }
     function filteredCases() {
@@ -741,14 +778,15 @@ _INDEX_HTML = """<!doctype html>
       const rows = filteredCases().map((item, index) => {
         const checked = selectedIds.has(item.id) ? 'checked' : '';
         const idArg = jsArg(item.id);
+        const priorityClass = escapeAttr(String(item.priority || '').toLowerCase().replace(/[^a-z0-9_-]/g, ''));
         return `<tr>
-          <td><input class="checkbox row-check" type="checkbox" ${checked} onchange="toggleSelect('${item.id}', this.checked)"></td>
+          <td><input class="checkbox row-check" type="checkbox" ${checked} onchange="toggleSelect('${idArg}', this.checked)"></td>
           <td>${index + 1}</td>
-          <td>${item.title}</td>
-          <td>${item.module}</td>
-          <td><span class="tag tag-${item.priority.toLowerCase()}">${item.priority}</span></td>
-          <td><span class="tag status-on">${item.status}</span></td>
-          <td>${item.created_at}</td>
+          <td>${escapeHtml(item.title)}</td>
+          <td>${escapeHtml(item.module)}</td>
+          <td><span class="tag tag-${priorityClass}">${escapeHtml(item.priority)}</span></td>
+          <td><span class="tag status-on">${escapeHtml(item.status)}</span></td>
+          <td>${escapeHtml(item.created_at)}</td>
           <td><button class="btn text" onclick="editCase('${idArg}')">编辑</button><button class="btn text" onclick="deleteCase('${idArg}')">删除</button></td>
         </tr>`;
       }).join('');
@@ -772,6 +810,7 @@ _INDEX_HTML = """<!doctype html>
       const ids = [...selectedIds];
       if (ids.length === 0) {
         document.getElementById('runLog').textContent = '未执行：请先勾选要执行的用例。';
+        switchTab('runs');
         toast('请先选择要执行的用例');
         return;
       }
@@ -812,14 +851,20 @@ _INDEX_HTML = """<!doctype html>
     async function checkDevice() {
       document.getElementById('deviceChecks').innerHTML = '<span class="check-item"><span class="dot pending"></span>正在真实检测...</span>';
       document.getElementById('checkDetail').innerHTML = '';
-      const data = await api('/api/devices/check');
-      renderDevice(data);
-      toast(data.ready ? '设备环境检查通过' : '设备环境仍需处理');
+      try {
+        const data = await api('/api/devices/check');
+        renderDevice(data);
+        toast(data.ready ? '设备环境检查通过' : '设备环境仍需处理');
+      } catch (error) {
+        document.getElementById('deviceChecks').innerHTML = '<span class="check-item"><span class="dot fail"></span>检测失败</span>';
+        document.getElementById('checkDetail').innerHTML = `<div class="check-card"><div class="check-title"><span class="dot fail"></span>检测失败</div><div class="check-message">${escapeHtml(error.message)}</div></div>`;
+        toast(`设备检测失败：${error.message}`);
+      }
     }
     function renderDevice(data) {
       const checks = data.checks || [];
-      document.getElementById('deviceChecks').innerHTML = checks.map(item => `<span class="check-item"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${item.name}</span>`).join('');
-      document.getElementById('checkDetail').innerHTML = checks.map(item => `<div class="check-card"><div class="check-title"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${item.name}</div><div class="check-message">${item.message || ''}</div><div class="check-command">${item.command || ''}</div></div>`).join('');
+      document.getElementById('deviceChecks').innerHTML = checks.map(item => `<span class="check-item"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${escapeHtml(item.name)}</span>`).join('');
+      document.getElementById('checkDetail').innerHTML = checks.map(item => `<div class="check-card"><div class="check-title"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${escapeHtml(item.name)}</div><div class="check-message">${escapeHtml(item.message || '')}</div><div class="check-command">${escapeHtml(item.command || '')}</div></div>`).join('');
       const config = data.config || {};
       const configItems = [
         ['设备地址', config.device_uri || '未配置'],
@@ -830,13 +875,12 @@ _INDEX_HTML = """<!doctype html>
         ['识别阈值', config.image_threshold ?? '0.8'],
         ['Poco', config.poco_enabled ? '已启用' : '未启用']
       ];
-      document.getElementById('deviceConfig').innerHTML = configItems.map(([label, value]) => `<div class="config-item"><span>${label}</span><strong>${value}</strong></div>`).join('');
-      const rows = (data.devices || []).map(item => `<tr><td>${item.serial}</td><td>${item.status}</td></tr>`).join('');
+      document.getElementById('deviceConfig').innerHTML = configItems.map(([label, value]) => `<div class="config-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+      const rows = (data.devices || []).map(item => `<tr><td>${escapeHtml(item.serial)}</td><td>${escapeHtml(item.status)}</td></tr>`).join('');
       document.getElementById('deviceTable').innerHTML = rows ? `<table><thead><tr><th>设备序列号</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">暂无 ADB 设备</div>';
     }
     loadCases();
-    loadReport();
-    checkDevice().catch(() => {});
+    loadReport().catch(error => toast(`加载报告失败：${error.message}`));
   </script>
 </body>
 </html>

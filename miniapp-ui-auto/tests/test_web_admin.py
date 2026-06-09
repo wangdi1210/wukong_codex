@@ -1,7 +1,24 @@
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from miniapp_ui_auto.web_admin import WebAdminService
+import pytest
+
+from miniapp_ui_auto.web_admin import WebAdminService, _INDEX_HTML
+
+
+def test_web_admin_inline_script_is_parseable(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    script = _INDEX_HTML.split("<script>", 1)[1].split("</script>", 1)[0]
+    script_path = tmp_path / "web_admin_inline.js"
+    script_path.write_text(script, encoding="utf-8")
+
+    result = subprocess.run([node, "--check", str(script_path)], capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_web_admin_generates_lists_runs_and_reports(tmp_path):
