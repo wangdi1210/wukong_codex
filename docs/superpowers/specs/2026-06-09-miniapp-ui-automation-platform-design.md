@@ -313,3 +313,7 @@ teardown()
 - 能生成包含步骤、截图、日志和失败原因的报告。
 - 能输出 AI 失败摘要。
 - 新增 Web/App/API Driver 时不需要重写用例管理和报告中心。
+
+## 一期 MVP 工程入口
+
+首版工程位于 `miniapp-ui-auto/`，先提供可本地验证的 dry-run Driver，并保留 Minium Driver 边界。真实 Minium 环境接入时，只需要继续完善 `src/miniapp_ui_auto/drivers/minium_driver.py`，用例加载、筛选、执行编排和报告能力不需要重写。
