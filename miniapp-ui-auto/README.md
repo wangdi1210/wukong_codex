@@ -17,3 +17,12 @@ miniapp-ui-auto run --cases cases --driver dry-run --tag smoke --report-dir repo
 ## 用例模型
 
 用例使用 YAML 编写，并通过 `schemas/case.schema.json` 校验。执行器消费标准动作，例如 `open_page`、`tap`、`input` 和断言动作。Minium 被封装在 Driver 层，后续 Web/App/API Driver 可以复用同一套编排和报告链路。
+
+## 本地验证
+
+```bash
+python -m pytest -v
+python -m miniapp_ui_auto.cli run --cases cases --driver dry-run --tag smoke --report-dir reports/summary
+```
+
+dry-run 命令会写出 `reports/summary/summary.json`。
