@@ -9,6 +9,7 @@ from miniapp_ui_auto.drivers.registry import create_driver
 from miniapp_ui_auto.filtering import CaseFilter, filter_cases
 from miniapp_ui_auto.models import RunContext
 from miniapp_ui_auto.runner import run_cases
+from miniapp_ui_auto.web_admin import run_web_admin
 
 
 def main() -> int:
@@ -41,11 +42,18 @@ def main() -> int:
     generate_parser.add_argument("--driver", default="airtest", choices=("dry-run", "airtest", "poco", "minium"))
     generate_parser.add_argument("--schema", default="schemas/case.schema.json")
 
+    web_parser = subparsers.add_parser("web", help="Start the local web admin")
+    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--port", type=int, default=8765)
+
     args = parser.parse_args()
     if args.command == "run":
         return _run(args)
     if args.command == "generate":
         return _generate(args)
+    if args.command == "web":
+        run_web_admin(args.host, args.port)
+        return 0
     return 2
 
 

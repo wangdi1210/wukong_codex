@@ -51,6 +51,27 @@ python -m miniapp_ui_auto.cli run --cases cases --driver airtest --tag smoke --r
 
 当前 `open_miniapp` 已预留 Poco 文本入口。不同团队进入微信小程序的路径可能不同，后续可以把“搜索小程序、最近使用、扫码入口”等路径沉淀成项目级步骤或模板。
 
+## 启动用例管理后台
+
+```bash
+python -m miniapp_ui_auto.cli web --host 127.0.0.1 --port 8765
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8765
+```
+
+后台当前支持：
+
+- 用自然语言生成 YAML 用例。
+- 查看已有用例列表。
+- 选择 `dry-run` 或 `airtest` 执行用例。
+- 查看最近一次 `summary.json` 报告和 AI 摘要。
+
+本地验证时先选择 `dry-run`；连接好 Airtest 设备后再选择 `airtest`。
+
 ## 用自然语言生成用例
 
 ```bash
