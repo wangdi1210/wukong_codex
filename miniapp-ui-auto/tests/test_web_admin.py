@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from miniapp_ui_auto.web_admin import WebAdminService
 
@@ -52,3 +53,25 @@ def test_web_admin_runs_only_selected_case_ids(tmp_path):
 
     assert result["total"] == 1
     assert result["cases"][0]["case_id"] == "selected_case"
+
+
+def test_web_admin_device_check_returns_config_and_checks(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "airtest.yaml").write_text(
+        "airtest:\n"
+        "  device_uri: Android:///127.0.0.1:7555\n"
+        "  package: com.tencent.mm\n"
+        "  miniapp_name: 职悟空\n"
+        "  poco:\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    service = WebAdminService(case_root=tmp_path / "cases", schema_path=Path("schemas/case.schema.json"), report_dir=tmp_path / "reports")
+
+    with patch("miniapp_ui_auto.web_admin.Path", side_effect=lambda value: config_dir / "airtest.yaml" if value == "config/airtest.yaml" else Path(value)):
+        result = service.check_device_environment()
+
+    assert result["config"]["device_uri"] == "Android:///127.0.0.1:7555"
+    assert any(item["name"] == "Airtest" for item in result["checks"])
+    assert any(item["name"] == "ADB" for item in result["checks"])

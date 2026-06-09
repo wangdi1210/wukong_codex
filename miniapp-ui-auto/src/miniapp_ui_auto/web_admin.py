@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from miniapp_ui_auto.case_generator import generate_case_from_text, write_generated_case
 from miniapp_ui_auto.case_loader import load_cases
+from miniapp_ui_auto.drivers.airtest_driver import load_airtest_config
 from miniapp_ui_auto.drivers.registry import create_driver
 from miniapp_ui_auto.filtering import CaseFilter, filter_cases
 from miniapp_ui_auto.models import RunContext, TestCase
@@ -83,6 +86,27 @@ class WebAdminService:
             }
         return json.loads(summary_path.read_text(encoding="utf-8"))
 
+    def check_device_environment(self) -> dict[str, Any]:
+        config = load_airtest_config(Path("config/airtest.yaml"))
+        checks = [
+            _check_python_module("Airtest", "airtest.core.api"),
+            _check_python_module("Poco", "poco.drivers.android.uiautomation"),
+        ]
+        adb_check = _check_adb_devices()
+        checks.append(adb_check)
+        config_check = {
+            "name": "设备配置",
+            "ok": bool(config.device_uri or adb_check.get("devices")),
+            "message": config.device_uri or "未配置 device_uri，可通过 ADB 已连接设备自动补齐。",
+        }
+        checks.append(config_check)
+        return {
+            "checks": checks,
+            "config": asdict(config),
+            "devices": adb_check.get("devices", []),
+            "ready": all(item["ok"] for item in checks),
+        }
+
 
 def run_web_admin(host: str, port: int, service: WebAdminService | None = None) -> None:
     service = service or WebAdminService()
@@ -108,6 +132,9 @@ class WebAdminHandler(BaseHTTPRequestHandler):
             return
         if route == "/api/reports/latest":
             self._send_json(self.web_service.load_summary())
+            return
+        if route == "/api/devices/check":
+            self._send_json(self.web_service.check_device_environment())
             return
         self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -186,6 +213,40 @@ def _format_created_at(path: Path) -> str:
         return "-"
 
 
+def _check_python_module(name: str, module_name: str) -> dict[str, Any]:
+    try:
+        __import__(module_name)
+    except ImportError as exc:
+        return {"name": name, "ok": False, "message": f"未安装或不可导入：{exc}"}
+    return {"name": name, "ok": True, "message": "已安装"}
+
+
+def _check_adb_devices() -> dict[str, Any]:
+    adb = shutil.which("adb")
+    if not adb:
+        return {"name": "ADB", "ok": False, "message": "未找到 adb 命令，请安装 Android SDK platform-tools 并加入 PATH。", "devices": []}
+    try:
+        result = subprocess.run(
+            [adb, "devices"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"name": "ADB", "ok": False, "message": f"执行 adb devices 失败：{exc}", "devices": []}
+
+    devices = []
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.strip().split()
+        if len(parts) >= 2:
+            devices.append({"serial": parts[0], "status": parts[1]})
+    ok_devices = [item for item in devices if item["status"] == "device"]
+    if ok_devices:
+        return {"name": "ADB", "ok": True, "message": f"已连接 {len(ok_devices)} 台设备。", "devices": devices}
+    return {"name": "ADB", "ok": False, "message": "未发现可用设备，请确认 USB 调试和授权弹窗。", "devices": devices}
+
+
 _INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -232,7 +293,7 @@ _INDEX_HTML = """<!doctype html>
     .empty { padding: 36px; text-align: center; color: #858b99; }
     .tab-page { display: none; }
     .tab-page.active { display: block; }
-    .panel { padding: 22px 24px; }
+    .panel { padding: 22px 24px; margin-bottom: 16px; }
     .panel h2 { margin: 0 0 16px; font-size: 18px; }
     pre { background: #f6f8fb; border: 1px solid #e8edf3; border-radius: 6px; padding: 14px; min-height: 120px; overflow: auto; white-space: pre-wrap; }
     .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); align-items: center; justify-content: center; z-index: 10; }
@@ -249,6 +310,23 @@ _INDEX_HTML = """<!doctype html>
     .field textarea { height: 80px; padding: 10px 12px; resize: vertical; border: 1px solid #d9d9d9; border-radius: 4px; }
     .toast { position: fixed; right: 24px; bottom: 24px; background: #1f2329; color: #fff; padding: 12px 16px; border-radius: 6px; display: none; z-index: 20; }
     .toast.show { display: block; }
+    .device-wrap { max-width: 1152px; margin: 0 auto; }
+    .check-row { display: flex; gap: 24px; align-items: center; margin: 22px 0; flex-wrap: wrap; }
+    .check-item { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: #d9d9d9; display: inline-block; }
+    .dot.ok { background: #52c41a; }
+    .dot.fail { background: #ff4d4f; }
+    .step-list { margin-top: 20px; }
+    .step { display: grid; grid-template-columns: 44px 1fr; gap: 0; padding: 18px 0; border-bottom: 1px solid #f0f0f0; }
+    .step:last-child { border-bottom: 0; }
+    .step-no { width: 28px; height: 28px; border-radius: 50%; background: #1677ff; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .step-title { font-size: 22px; margin-bottom: 8px; }
+    .step-desc { color: #4e5969; font-size: 14px; }
+    .code-line { background: #f6f8fb; border-radius: 4px; padding: 18px; font-family: Consolas, monospace; color: #1d2129; overflow-x: auto; }
+    .config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    .config-item { background: #f8fafc; border: 1px solid #edf0f5; border-radius: 6px; padding: 12px; }
+    .config-item span { display: block; color: #858b99; font-size: 13px; margin-bottom: 6px; }
+    .device-table { margin-top: 14px; }
     @media (max-width: 900px) {
       main { padding: 16px; }
       .metrics { grid-template-columns: repeat(2, 1fr); }
@@ -322,14 +400,32 @@ _INDEX_HTML = """<!doctype html>
       </div>
     </section>
     <section id="devices" class="tab-page">
-      <div class="panel">
-        <h2>设备配置</h2>
-        <pre>当前通过 config/airtest.yaml 管理设备。
-示例：
-device_uri: Android:///127.0.0.1:7555
-package: com.tencent.mm
-miniapp_name: 职悟空
-poco.enabled: true</pre>
+      <div class="device-wrap">
+        <div class="panel">
+          <h2>📱 连接设备</h2>
+          <div class="check-row" id="deviceChecks">
+            <span class="check-item"><span class="dot"></span>Airtest</span>
+            <span class="check-item"><span class="dot"></span>ADB</span>
+            <span class="check-item"><span class="dot"></span>设备</span>
+          </div>
+          <button class="btn primary" onclick="checkDevice()">检查环境</button>
+          <div class="config-grid" id="deviceConfig"></div>
+          <div class="device-table" id="deviceTable"></div>
+        </div>
+        <div class="panel">
+          <h2>📋 连接步骤</h2>
+          <div class="step-list">
+            <div class="step"><div class="step-no">1</div><div><div class="step-title">开启手机开发者模式</div><div class="step-desc">设置 → 关于手机 → 连续点击“版本号”7次 → 返回设置 → 出现“开发者选项”</div></div></div>
+            <div class="step"><div class="step-no">2</div><div><div class="step-title">开启USB调试</div><div class="step-desc">设置 → 开发者选项 → USB调试 → 开启</div></div></div>
+            <div class="step"><div class="step-no">3</div><div><div class="step-title">连接手机到电脑</div><div class="step-desc">用USB数据线连接手机，手机上选择“传输文件”模式，弹窗时点击“确定”</div></div></div>
+            <div class="step"><div class="step-no">4</div><div><div class="step-title">验证连接</div><div class="step-desc">点击上方“检查环境”，或在终端执行 adb devices，看到设备序列号即成功</div></div></div>
+            <div class="step"><div class="step-no">5</div><div><div class="step-title">运行测试</div><div class="step-desc">在用例管理创建用例，选择要执行的用例，点击“执行选中”</div></div></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>⚡ 快捷命令</h2>
+          <div class="code-line">adb devices  # 检查设备<br>python -m miniapp_ui_auto.cli run --cases cases --driver airtest --tag smoke --report-dir reports/summary  # 运行测试</div>
+        </div>
       </div>
     </section>
   </main>
@@ -461,8 +557,30 @@ poco.enabled: true</pre>
       document.getElementById('reportSkipped').textContent = data.skipped || 0;
       document.getElementById('aiSummary').textContent = data.ai_summary || '暂无执行报告。';
     }
+    async function checkDevice() {
+      const data = await api('/api/devices/check');
+      renderDevice(data);
+      toast(data.ready ? '设备环境检查通过' : '设备环境仍需处理');
+    }
+    function renderDevice(data) {
+      const checks = data.checks || [];
+      document.getElementById('deviceChecks').innerHTML = checks.map(item => `<span class="check-item"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${item.name}</span>`).join('');
+      const config = data.config || {};
+      const configItems = [
+        ['设备地址', config.device_uri || '未配置'],
+        ['微信包名', config.package || 'com.tencent.mm'],
+        ['小程序名', config.miniapp_name || '未配置'],
+        ['图片目录', config.image_dir || 'assets/images'],
+        ['识别阈值', config.image_threshold ?? '0.8'],
+        ['Poco', config.poco_enabled ? '已启用' : '未启用']
+      ];
+      document.getElementById('deviceConfig').innerHTML = configItems.map(([label, value]) => `<div class="config-item"><span>${label}</span><strong>${value}</strong></div>`).join('');
+      const rows = (data.devices || []).map(item => `<tr><td>${item.serial}</td><td>${item.status}</td></tr>`).join('');
+      document.getElementById('deviceTable').innerHTML = rows ? `<table><thead><tr><th>设备序列号</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">暂无 ADB 设备</div>';
+    }
     loadCases();
     loadReport();
+    checkDevice().catch(() => {});
   </script>
 </body>
 </html>
