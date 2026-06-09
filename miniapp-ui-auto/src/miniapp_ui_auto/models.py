@@ -21,6 +21,8 @@ class Assertion:
 
 @dataclass(frozen=True)
 class TestCase:
+    __test__ = False
+
     id: str
     title: str
     platform: str
