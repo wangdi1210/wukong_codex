@@ -34,6 +34,10 @@ class WebAdminService:
     def list_cases(self) -> list[dict[str, Any]]:
         return [_case_record(case) for case in load_cases(self.case_root, self.schema_path)]
 
+    def get_case(self, case_id: str) -> dict[str, Any]:
+        case = self._find_case(case_id)
+        return _case_detail(case)
+
     def generate_case(self, payload: dict[str, Any]) -> dict[str, Any]:
         case_id = _required(payload, "case_id")
         generated = generate_case_from_text(
@@ -50,6 +54,29 @@ class WebAdminService:
         write_generated_case(generated, output)
         load_cases(output.parent, self.schema_path)
         return {"path": str(output), "case": generated.payload}
+
+    def update_case(self, case_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        existing = self._find_case(case_id)
+        generated = generate_case_from_text(
+            _required(payload, "text"),
+            case_id=case_id,
+            title=_required(payload, "title"),
+            module=_required(payload, "module"),
+            priority=payload.get("priority", existing.priority),
+            tags=tuple(payload.get("tags") or existing.tags),
+            owner=payload.get("owner", existing.owner),
+            driver=payload.get("driver", existing.driver),
+        )
+        output = Path(existing.source_path)
+        write_generated_case(generated, output)
+        load_cases(output.parent, self.schema_path)
+        return {"path": str(output), "case": generated.payload}
+
+    def delete_case(self, case_id: str) -> dict[str, Any]:
+        case = self._find_case(case_id)
+        path = Path(case.source_path)
+        path.unlink()
+        return {"deleted": case_id, "path": str(path)}
 
     def run_cases(self, payload: dict[str, Any]) -> dict[str, Any]:
         cases = load_cases(self.case_root, self.schema_path)
@@ -107,6 +134,12 @@ class WebAdminService:
             "ready": all(item["ok"] for item in checks),
         }
 
+    def _find_case(self, case_id: str) -> TestCase:
+        for case in load_cases(self.case_root, self.schema_path):
+            if case.id == case_id:
+                return case
+        raise ValueError(f"未找到用例：{case_id}")
+
 
 def run_web_admin(host: str, port: int, service: WebAdminService | None = None) -> None:
     service = service or WebAdminService()
@@ -130,6 +163,9 @@ class WebAdminHandler(BaseHTTPRequestHandler):
         if route == "/api/cases":
             self._send_json({"cases": self.web_service.list_cases()})
             return
+        if route.startswith("/api/cases/"):
+            self._send_json(self.web_service.get_case(_route_id(route, "/api/cases/")))
+            return
         if route == "/api/reports/latest":
             self._send_json(self.web_service.load_summary())
             return
@@ -147,6 +183,26 @@ class WebAdminHandler(BaseHTTPRequestHandler):
                 return
             if route == "/api/runs":
                 self._send_json(self.web_service.run_cases(payload))
+                return
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+        except Exception as exc:  # noqa: BLE001 - convert web errors into JSON responses.
+            self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def do_PUT(self) -> None:  # noqa: N802 - stdlib handler API.
+        route = urlparse(self.path).path
+        try:
+            if route.startswith("/api/cases/"):
+                self._send_json(self.web_service.update_case(_route_id(route, "/api/cases/"), self._read_payload()))
+                return
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+        except Exception as exc:  # noqa: BLE001 - convert web errors into JSON responses.
+            self._send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler API.
+        route = urlparse(self.path).path
+        try:
+            if route.startswith("/api/cases/"):
+                self._send_json(self.web_service.delete_case(_route_id(route, "/api/cases/")))
                 return
             self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:  # noqa: BLE001 - convert web errors into JSON responses.
@@ -195,6 +251,50 @@ def _case_record(case: TestCase) -> dict[str, Any]:
         "status": "启用",
         "created_at": _format_created_at(Path(case.source_path)),
     }
+
+
+def _case_detail(case: TestCase) -> dict[str, Any]:
+    record = _case_record(case)
+    record.update(
+        {
+            "preconditions": list(case.preconditions),
+            "steps": [asdict(step) for step in case.steps],
+            "assertions": [asdict(assertion) for assertion in case.assertions],
+            "natural_steps": _steps_to_natural_text(case),
+            "natural_expected": "\n".join(str(item.expected if item.expected != "visible" else item.target) for item in case.assertions),
+        }
+    )
+    return record
+
+
+def _steps_to_natural_text(case: TestCase) -> str:
+    lines = []
+    for step in case.steps:
+        if step.action == "open_app":
+            lines.append(f"打开 {step.target}")
+        elif step.action == "open_miniapp":
+            lines.append(f"进入 {step.target}小程序")
+        elif step.action == "tap":
+            lines.append(f"点击 {step.target}")
+        elif step.action == "input":
+            value = "" if step.value is None else str(step.value)
+            lines.append(f"输入 {step.target}：{value}")
+        elif step.action == "wait":
+            lines.append(f"等待 {step.target}")
+        elif step.action == "screenshot":
+            lines.append("截图")
+        else:
+            lines.append(f"{step.action} {step.target}")
+    return "\n".join(lines)
+
+
+def _route_id(route: str, prefix: str) -> str:
+    from urllib.parse import unquote
+
+    case_id = unquote(route.removeprefix(prefix)).strip("/")
+    if not case_id:
+        raise ValueError("缺少用例 ID")
+    return case_id
 
 
 def _required(payload: dict[str, Any], key: str) -> str:
@@ -431,7 +531,7 @@ _INDEX_HTML = """<!doctype html>
   </main>
   <div class="modal-mask" id="modalMask">
     <div class="modal">
-      <div class="modal-head"><div class="modal-title">新增用例</div><button class="close" onclick="closeModal()">×</button></div>
+      <div class="modal-head"><div class="modal-title" id="modalTitle">新增用例</div><button class="close" onclick="closeModal()">×</button></div>
       <div class="modal-body">
         <div class="field"><label>用例标题 *</label><input id="formTitle" placeholder="请输入用例标题"></div>
         <div class="field"><label>所属模块</label><input id="formModule" placeholder="例如：登录、首页、个人中心"></div>
@@ -447,6 +547,7 @@ _INDEX_HTML = """<!doctype html>
   <script>
     let allCases = [];
     let selectedIds = new Set();
+    let editingCaseId = '';
 
     async function api(path, options) {
       const response = await fetch(path, options);
@@ -465,9 +566,23 @@ _INDEX_HTML = """<!doctype html>
       el.classList.add('show');
       setTimeout(() => el.classList.remove('show'), 2400);
     }
-    function openModal() { document.getElementById('modalMask').classList.add('show'); }
+    function openModal() {
+      editingCaseId = '';
+      document.getElementById('modalTitle').textContent = '新增用例';
+      clearForm();
+      document.getElementById('modalMask').classList.add('show');
+    }
     function closeModal() { document.getElementById('modalMask').classList.remove('show'); }
+    function clearForm() {
+      document.getElementById('formTitle').value = '';
+      document.getElementById('formModule').value = '';
+      document.getElementById('formPriority').value = 'P2';
+      document.getElementById('formPreconditions').value = '';
+      document.getElementById('formSteps').value = '';
+      document.getElementById('formExpected').value = '';
+    }
     function splitLines(value) { return value.split(/\\n+/).map(item => item.replace(/^\\s*\\d+[.、)]\\s*/, '').trim()).filter(Boolean); }
+    function jsArg(value) { return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
     function caseIdFrom(title) {
       const now = new Date();
       const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
@@ -483,10 +598,36 @@ _INDEX_HTML = """<!doctype html>
         return;
       }
       const text = [...splitLines(document.getElementById('formPreconditions').value).map(item => `前置条件 ${item}`), ...steps, ...expected.map(item => `断言 ${item}`)].join('。');
-      const payload = { case_id: caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest' };
-      await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+      const payload = { case_id: editingCaseId || caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest' };
+      if (editingCaseId) {
+        await api(`/api/cases/${encodeURIComponent(editingCaseId)}`, { method: 'PUT', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+      } else {
+        await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+      }
       closeModal();
-      toast('用例已保存');
+      toast(editingCaseId ? '用例已更新' : '用例已保存');
+      editingCaseId = '';
+      await loadCases();
+    }
+    async function editCase(id) {
+      const data = await api(`/api/cases/${encodeURIComponent(id)}`);
+      editingCaseId = id;
+      document.getElementById('modalTitle').textContent = '编辑用例';
+      document.getElementById('formTitle').value = data.title || '';
+      document.getElementById('formModule').value = data.module || '';
+      document.getElementById('formPriority').value = data.priority || 'P2';
+      document.getElementById('formPreconditions').value = (data.preconditions || []).join('\\n');
+      document.getElementById('formSteps').value = data.natural_steps || '';
+      document.getElementById('formExpected').value = data.natural_expected || '';
+      document.getElementById('modalMask').classList.add('show');
+    }
+    async function deleteCase(id) {
+      if (!confirm(`确认删除用例 ${id}？删除后会移除对应 YAML 文件。`)) {
+        return;
+      }
+      await api(`/api/cases/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      selectedIds.delete(id);
+      toast('用例已删除');
       await loadCases();
     }
     async function loadCases() {
@@ -511,6 +652,7 @@ _INDEX_HTML = """<!doctype html>
     function renderCaseTable() {
       const rows = filteredCases().map((item, index) => {
         const checked = selectedIds.has(item.id) ? 'checked' : '';
+        const idArg = jsArg(item.id);
         return `<tr>
           <td><input class="checkbox row-check" type="checkbox" ${checked} onchange="toggleSelect('${item.id}', this.checked)"></td>
           <td>${index + 1}</td>
@@ -519,7 +661,7 @@ _INDEX_HTML = """<!doctype html>
           <td><span class="tag tag-${item.priority.toLowerCase()}">${item.priority}</span></td>
           <td><span class="tag status-on">${item.status}</span></td>
           <td>${item.created_at}</td>
-          <td><button class="btn text" onclick="toast('编辑能力下一步接入')">编辑</button><button class="btn text" onclick="toast('删除能力下一步接入')">删除</button></td>
+          <td><button class="btn text" onclick="editCase('${idArg}')">编辑</button><button class="btn text" onclick="deleteCase('${idArg}')">删除</button></td>
         </tr>`;
       }).join('');
       document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无用例</td></tr>';

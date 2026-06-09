@@ -26,11 +26,14 @@ def generate_case_from_text(
     driver: str = "airtest",
 ) -> GeneratedCase:
     lines = _clean_lines(text)
+    preconditions: list[str] = []
     steps: list[dict[str, Any]] = []
     assertions: list[dict[str, Any]] = []
 
     for line in lines:
-        if _looks_like_assertion(line):
+        if line.startswith(("前置条件", "前置")):
+            preconditions.append(_strip_known_prefixes(line, ("前置条件", "前置")).strip(" ：:"))
+        elif _looks_like_assertion(line):
             assertions.append(_parse_assertion(line))
         else:
             steps.append(_parse_step(line))
@@ -50,7 +53,7 @@ def generate_case_from_text(
         "tags": _dedupe(tags),
         "owner": owner,
         "version": 1,
-        "preconditions": [],
+        "preconditions": preconditions,
         "steps": steps,
         "assertions": assertions,
     }

@@ -55,6 +55,45 @@ def test_web_admin_runs_only_selected_case_ids(tmp_path):
     assert result["cases"][0]["case_id"] == "selected_case"
 
 
+def test_web_admin_can_get_update_and_delete_case(tmp_path):
+    service = WebAdminService(
+        case_root=tmp_path / "cases",
+        schema_path=Path("schemas/case.schema.json"),
+        report_dir=tmp_path / "reports",
+    )
+    service.generate_case(
+        {
+            "case_id": "editable_case",
+            "title": "编辑前标题",
+            "module": "login",
+            "tags": ["smoke"],
+            "text": "前置条件 用户已登录。点击 我的。断言 用户昵称",
+        }
+    )
+
+    detail = service.get_case("editable_case")
+    updated = service.update_case(
+        "editable_case",
+        {
+            "title": "编辑后标题",
+            "module": "profile",
+            "priority": "P1",
+            "tags": ["smoke"],
+            "text": "前置条件 用户已登录。点击 个人中心。断言 资料页",
+        },
+    )
+    updated_detail = service.get_case("editable_case")
+    deleted = service.delete_case("editable_case")
+
+    assert detail["natural_steps"] == "点击 我的"
+    assert updated["case"]["title"] == "编辑后标题"
+    assert updated_detail["module"] == "profile"
+    assert updated_detail["priority"] == "P1"
+    assert updated_detail["natural_expected"] == "资料页"
+    assert deleted["deleted"] == "editable_case"
+    assert service.list_cases() == []
+
+
 def test_web_admin_device_check_returns_config_and_checks(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()

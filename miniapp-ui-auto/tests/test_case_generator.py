@@ -36,3 +36,16 @@ def test_generate_case_from_natural_language_and_load_it(tmp_path):
     assert case.steps[4].action == "input"
     assert case.steps[4].value == "13800000000"
     assert case.assertions[0].target == "用户昵称"
+
+
+def test_generate_case_keeps_preconditions(tmp_path):
+    generated = generate_case_from_text(
+        "前置条件 用户已登录\n点击 我的\n断言 用户昵称",
+        case_id="precondition_case",
+        title="前置条件用例",
+        module="login",
+    )
+    write_generated_case(generated, tmp_path / "precondition_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.preconditions == ("用户已登录",)
