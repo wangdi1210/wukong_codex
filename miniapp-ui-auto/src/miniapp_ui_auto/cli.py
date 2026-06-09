@@ -18,7 +18,8 @@ def main() -> int:
     run_parser = subparsers.add_parser("run", help="Run miniapp UI automation cases")
     run_parser.add_argument("--cases", default="cases")
     run_parser.add_argument("--schema", default="schemas/case.schema.json")
-    run_parser.add_argument("--driver", default="dry-run", choices=("dry-run", "minium"))
+    run_parser.add_argument("--driver", default="dry-run", choices=("dry-run", "airtest", "poco", "minium"))
+    run_parser.add_argument("--case-driver", action="append", default=[])
     run_parser.add_argument("--tag", action="append", default=[])
     run_parser.add_argument("--priority", action="append", default=[])
     run_parser.add_argument("--module", action="append", default=[])
@@ -37,7 +38,7 @@ def main() -> int:
     generate_parser.add_argument("--priority", default="P0", choices=("P0", "P1", "P2", "P3"))
     generate_parser.add_argument("--tag", action="append", default=[])
     generate_parser.add_argument("--owner", default="qa")
-    generate_parser.add_argument("--driver", default="dry-run", choices=("dry-run", "minium"))
+    generate_parser.add_argument("--driver", default="airtest", choices=("dry-run", "airtest", "poco", "minium"))
     generate_parser.add_argument("--schema", default="schemas/case.schema.json")
 
     args = parser.parse_args()
@@ -56,7 +57,7 @@ def _run(args: argparse.Namespace) -> int:
             tags=tuple(args.tag),
             priorities=tuple(args.priority),
             modules=tuple(args.module),
-            drivers=(args.driver,),
+            drivers=tuple(args.case_driver),
         ),
     )
     summary = run_cases(

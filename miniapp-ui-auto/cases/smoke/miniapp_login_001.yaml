@@ -1,7 +1,7 @@
 id: miniapp_login_001
 title: 手机号验证码登录成功
 platform: miniapp
-driver: dry-run
+driver: airtest
 module: login
 priority: P0
 tags:
@@ -13,8 +13,10 @@ preconditions:
   - 已配置测试环境
   - 验证码服务使用固定验证码
 steps:
-  - action: open_page
-    target: pages/index/index
+  - action: open_app
+    target: 微信
+  - action: open_miniapp
+    target: 职悟空
   - action: tap
     target: 我的
   - action: tap

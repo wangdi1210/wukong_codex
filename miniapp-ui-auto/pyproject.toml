@@ -1,7 +1,7 @@
 [project]
 name = "miniapp-ui-auto"
 version = "0.1.0"
-description = "Minium-oriented miniapp UI automation MVP"
+description = "Airtest-oriented miniapp UI automation MVP"
 requires-python = ">=3.11"
 dependencies = [
   "pyyaml>=6.0.2",

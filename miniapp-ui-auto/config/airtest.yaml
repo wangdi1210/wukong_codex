@@ -1,0 +1,8 @@
+airtest:
+  device_uri: ""
+  platform: android
+  package: com.tencent.mm
+  miniapp_name: 职悟空
+  image_threshold: 0.8
+  poco:
+    enabled: true

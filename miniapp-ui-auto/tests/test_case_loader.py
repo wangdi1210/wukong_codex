@@ -12,8 +12,8 @@ def test_load_valid_case_from_directory():
     case = cases[0]
     assert case.id == "miniapp_login_001"
     assert case.platform == "miniapp"
-    assert case.driver == "dry-run"
-    assert case.steps[0].action == "open_page"
+    assert case.driver == "airtest"
+    assert case.steps[0].action == "open_app"
     assert case.assertions[0].target == "用户昵称"
 
 

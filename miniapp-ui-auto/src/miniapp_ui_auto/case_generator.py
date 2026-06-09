@@ -23,7 +23,7 @@ def generate_case_from_text(
     priority: str = "P0",
     tags: tuple[str, ...] = ("smoke",),
     owner: str = "qa",
-    driver: str = "dry-run",
+    driver: str = "airtest",
 ) -> GeneratedCase:
     lines = _clean_lines(text)
     steps: list[dict[str, Any]] = []
@@ -98,7 +98,12 @@ def _parse_assertion(line: str) -> dict[str, Any]:
 
 def _parse_step(line: str) -> dict[str, Any]:
     if line.startswith(("打开", "进入", "访问")):
-        return {"action": "open_page", "target": _extract_target(line, ("打开", "进入", "访问"))}
+        target = _extract_target(line, ("打开", "进入", "访问"))
+        if target in ("微信", "WeChat", "wechat"):
+            return {"action": "open_app", "target": "微信"}
+        if "小程序" in target:
+            return {"action": "open_miniapp", "target": target.replace("小程序", "").strip() or target}
+        return {"action": "open_page", "target": target}
     if line.startswith(("点击", "点", "选择")):
         return {"action": "tap", "target": _extract_target(line, ("点击", "点", "选择"))}
     if line.startswith(("输入", "填写", "填入")):

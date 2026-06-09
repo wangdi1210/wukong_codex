@@ -2,16 +2,16 @@
 
 ## 背景
 
-当前团队希望以小程序 UI 自动化作为首个落地场景，验证 AI 辅助执行、用例编写、版本管理、定时执行和可视化报告的完整闭环。虽然一期只接入小程序，但架构需要预留全平台推广能力，后续可以扩展到 Web、App、接口、桌面端和混合端场景。
+当前团队希望以小程序 UI 自动化作为首个落地场景，验证 AI 辅助执行、用例编写、版本管理、定时执行和可视化报告的完整闭环。团队当前不以获取小程序源码为前提，因此一期主路线调整为 Airtest/Poco，通过真实设备或模拟器里的微信小程序执行回归。虽然一期只接入小程序，但架构需要预留全平台推广能力，后续可以扩展到 Web、App、接口、桌面端和混合端场景。
 
-本设计采用“平台主干 + Driver 插件”的方式：平台层负责用例资产、执行编排、AI 能力、报告和质量数据；小程序侧通过 Minium Driver 接入，避免把平台能力绑定死在单一小程序框架上。
+本设计采用“平台主干 + Driver 插件”的方式：平台层负责用例资产、执行编排、AI 能力、报告和质量数据；小程序侧优先通过 Airtest/Poco Driver 接入，Minium 仅作为拿到源码和微信开发者工具权限后的可选补充，避免把平台能力绑定死在单一小程序框架上。
 
 ## 目标
 
 一期目标是建立可推广的最小平台闭环，而不是只写一批小程序脚本。
 
 - 支持小程序 UI 自动化用例编写、存储和版本管理。
-- 支持基于 Minium 的小程序自动化执行。
+- 支持基于 Airtest/Poco 的小程序自动化执行，不强依赖小程序源码。
 - 支持自然语言用例到结构化步骤的 AI 辅助转换。
 - 支持定时执行、手动执行和按标签执行。
 - 支持截图、日志、失败原因和 HTML/Allure 可视化报告。
@@ -35,7 +35,7 @@ flowchart TD
     C --> D["执行编排器"]
     D --> E["AI Case Agent"]
     D --> F["Driver 适配层"]
-    F --> G["Minium 小程序 Driver"]
+    F --> G["Airtest/Poco 小程序 Driver"]
     F --> H["未来 Web Driver"]
     F --> I["未来 App Driver"]
     F --> J["未来 API Driver"]
@@ -51,16 +51,16 @@ flowchart TD
 1. 用例资产层：管理自然语言用例、结构化 DSL、测试数据、标签、优先级和版本。
 2. 执行编排层：负责选择用例、分发任务、调度 Driver、重试和收集结果。
 3. AI 能力层：负责用例结构化、步骤解释、元素定位辅助、失败归因和报告摘要。
-4. Driver 适配层：一期接 Minium，后续扩展 Playwright、Appium、API Driver。
+4. Driver 适配层：一期接 Airtest/Poco，Minium 作为可选补充，后续扩展 Playwright、Appium、API Driver。
 5. 报告与质量层：输出单次报告、失败明细、截图、日志和趋势数据。
 
 ## 一期技术选型
 
 | 模块 | 选型 | 说明 |
 | --- | --- | --- |
-| 小程序执行 | Minium | 小程序 UI 自动化首选 Driver，支持页面操作、数据注入、Hook/Mock 等能力 |
+| 小程序执行 | Airtest + Poco | 小程序 UI 自动化首选 Driver，不强依赖源码，支持真机/模拟器上按用户视角执行 |
 | 用例格式 | YAML + JSON Schema | 测试人员可读，执行器可校验 |
-| 执行语言 | Python 优先 | 与 Minium 生态贴合，后续可通过 HTTP/CLI 接入其他 Driver |
+| 执行语言 | Python 优先 | 与 Airtest/Poco 生态贴合，后续可通过 HTTP/CLI 接入其他 Driver |
 | 报告 | Allure + 自定义摘要 JSON | Allure 负责可视化，自定义 JSON 负责平台化沉淀 |
 | 调度 | CI 定时任务优先 | 先通过 Jenkins/GitHub Actions/GitLab CI 形成闭环 |
 | AI Agent | 独立执行辅助模块 | 不直接替代 Driver，只做步骤生成、定位建议和失败分析 |
@@ -79,7 +79,7 @@ miniapp-ui-auto/
     users/
   drivers/
     base/
-    minium/
+    airtest/
   runner/
     case_loader.py
     scheduler.py
@@ -95,7 +95,7 @@ miniapp-ui-auto/
     summary/
   config/
     env.yaml
-    minium.yaml
+    airtest.yaml
     schedule.yaml
   docs/
 ```
@@ -110,7 +110,7 @@ miniapp-ui-auto/
 id: miniapp_login_001
 title: 手机号验证码登录成功
 platform: miniapp
-driver: minium
+driver: airtest
 module: login
 priority: P0
 tags:
@@ -122,8 +122,10 @@ preconditions:
   - 已配置测试环境
   - 验证码服务使用固定验证码
 steps:
-  - action: open_page
-    target: pages/index/index
+  - action: open_app
+    target: 微信
+  - action: open_miniapp
+    target: 职悟空
   - action: tap
     target: 我的
   - action: tap
@@ -153,7 +155,9 @@ Driver 不直接消费自然语言，而是消费标准动作协议。这样后�
 
 | 动作 | 说明 |
 | --- | --- |
-| open_page | 打开小程序页面 |
+| open_app | 打开微信等宿主 App |
+| open_miniapp | 进入目标小程序 |
+| open_page | 打开小程序页面，主要用于有源码或调试能力的 Driver |
 | tap | 点击元素 |
 | input | 输入文本 |
 | wait | 等待页面、元素或接口状态 |
@@ -164,7 +168,7 @@ Driver 不直接消费自然语言，而是消费标准动作协议。这样后�
 | mock | 设置接口或 wx 能力 Mock |
 | set_storage | 设置登录态或本地缓存 |
 
-Minium Driver 负责把这些动作翻译成 Minium API 调用。平台上层只感知动作协议，不感知 Minium 细节。
+Airtest/Poco Driver 负责把这些动作翻译成图像识别、控件识别、点击、输入和断言操作。平台上层只感知动作协议，不感知 Airtest、Poco 或 Minium 细节。
 
 ## AI Agent 设计
 
@@ -177,17 +181,17 @@ AI Agent 一期承担四类能力：
 
 AI Agent 不直接绕过 Driver 操作页面，所有真实执行动作必须经过 Driver 适配层，以保证可审计、可回放和可稳定调试。
 
-## Minium Driver 边界
+## Airtest/Poco Driver 边界
 
-Minium Driver 是小程序一期的核心执行插件，职责包括：
+Airtest/Poco Driver 是小程序一期的核心执行插件，职责包括：
 
-- 启动并连接微信开发者工具、小程序项目、模拟器或真机。
-- 打开指定页面并执行 tap、input、wait、assert 等标准动作。
-- 支持小程序页面数据读取、storage 设置、mock 和 hook 能力。
+- 连接 Android/iOS 真机或模拟器，并启动微信。
+- 通过搜索、最近使用或固定入口进入目标小程序。
+- 基于图像模板或 Poco 控件树执行 tap、input、wait、assert 等标准动作。
 - 采集截图、页面路径、控制台日志和失败上下文。
-- 将 Minium 异常统一转换为平台执行错误码。
+- 将 Airtest/Poco 异常统一转换为平台执行错误码。
 
-Minium Driver 不负责：
+Airtest/Poco Driver 不负责：
 
 - 管理用例版本。
 - 决定执行计划。
@@ -202,7 +206,7 @@ sequenceDiagram
     participant Plan as 执行计划
     participant Runner as 执行编排器
     participant AI as AI Case Agent
-    participant Driver as Minium Driver
+    participant Driver as Airtest/Poco Driver
     participant Report as 报告中心
 
     User->>Plan: 选择标签、环境、分支
@@ -248,7 +252,8 @@ sequenceDiagram
 
 | 平台 | Driver |
 | --- | --- |
-| 小程序 | Minium Driver |
+| 小程序 | Airtest/Poco Driver |
+| 小程序源码级补充 | Minium Driver |
 | Web/H5 | Playwright Driver |
 | 原生 App | Appium Driver |
 | 接口 | API Driver |
@@ -269,7 +274,8 @@ teardown()
 | --- | --- |
 | 小程序元素定位不稳定 | 建立页面对象、语义 target 映射和 AI 候选定位 |
 | 登录态和测试数据不稳定 | 使用 storage 注入、固定验证码、测试账号池和接口准备数据 |
-| Minium 环境依赖复杂 | 固化微信开发者工具版本、配置检查脚本和执行前健康检查 |
+| 图像识别不稳定 | 优先使用 Poco 控件识别，关键按钮沉淀模板图，并统一设备分辨率 |
+| Airtest 设备环境依赖复杂 | 固化 Airtest、Poco、ADB、设备连接配置，并增加执行前健康检查 |
 | AI 输出不可控 | AI 只生成建议和结构化步骤，执行前做 Schema 校验 |
 | 后续多端扩展困难 | 一期就抽象统一动作协议和 Driver 接口 |
 
@@ -278,7 +284,7 @@ teardown()
 ### 阶段 1：小程序闭环
 
 - 建立用例 YAML 和 Schema。
-- 接入 Minium Driver。
+- 接入 Airtest/Poco Driver。
 - 支持 P0 冒烟用例执行。
 - 输出 Allure 报告和 Summary JSON。
 - 支持 CI 定时执行。
@@ -309,11 +315,11 @@ teardown()
 
 - 能在 Git 中维护小程序 YAML 用例。
 - 能通过命令行或 CI 选择 P0 冒烟并执行。
-- 能基于 Minium 驱动小程序完成至少一条登录或核心链路用例。
+- 能基于 Airtest/Poco 驱动微信小程序完成至少一条登录或核心链路用例。
 - 能生成包含步骤、截图、日志和失败原因的报告。
 - 能输出 AI 失败摘要。
 - 新增 Web/App/API Driver 时不需要重写用例管理和报告中心。
 
 ## 一期 MVP 工程入口
 
-首版工程位于 `miniapp-ui-auto/`，先提供可本地验证的 dry-run Driver，并保留 Minium Driver 边界。真实 Minium 环境接入时，只需要继续完善 `src/miniapp_ui_auto/drivers/minium_driver.py`，用例加载、筛选、执行编排和报告能力不需要重写。
+首版工程位于 `miniapp-ui-auto/`，先提供可本地验证的 dry-run Driver，并保留 Airtest Driver 边界。真实 Airtest/Poco 环境接入时，只需要继续完善 `src/miniapp_ui_auto/drivers/airtest_driver.py`，用例加载、筛选、执行编排和报告能力不需要重写。Minium Driver 继续保留为有源码和微信开发者工具权限时的补充方案。

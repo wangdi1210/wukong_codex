@@ -6,7 +6,8 @@ from miniapp_ui_auto.case_loader import load_cases
 
 def test_generate_case_from_natural_language_and_load_it(tmp_path):
     text = """
-    打开 pages/index/index
+    打开 微信
+    进入 职悟空小程序
     点击 我的
     点击 登录
     输入 手机号输入框：13800000000
@@ -29,7 +30,9 @@ def test_generate_case_from_natural_language_and_load_it(tmp_path):
     assert len(cases) == 1
     case = cases[0]
     assert case.id == "miniapp_login_generated_001"
-    assert case.steps[0].action == "open_page"
-    assert case.steps[3].action == "input"
-    assert case.steps[3].value == "13800000000"
+    assert case.driver == "airtest"
+    assert case.steps[0].action == "open_app"
+    assert case.steps[1].action == "open_miniapp"
+    assert case.steps[4].action == "input"
+    assert case.steps[4].value == "13800000000"
     assert case.assertions[0].target == "用户昵称"
