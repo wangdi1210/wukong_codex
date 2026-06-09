@@ -1,8 +1,58 @@
 import pytest
 import builtins
 
-from miniapp_ui_auto.drivers.airtest_driver import AirtestDriver, AirtestUnavailableError
-from miniapp_ui_auto.models import RunContext
+from miniapp_ui_auto.drivers.airtest_driver import AirtestDriver, AirtestUnavailableError, load_airtest_config
+from miniapp_ui_auto.models import RunContext, Step
+
+
+class FakeAirtestApi:
+    Template = staticmethod(lambda filename, threshold=None: {"filename": filename, "threshold": threshold})
+
+    def __init__(self):
+        self.calls = []
+
+    def connect_device(self, device_uri):
+        self.calls.append(("connect_device", device_uri))
+
+    def start_app(self, package):
+        self.calls.append(("start_app", package))
+
+    def touch(self, target):
+        self.calls.append(("touch", target))
+
+    def text(self, value):
+        self.calls.append(("text", value))
+
+    def exists(self, target):
+        self.calls.append(("exists", target))
+        return True
+
+    def wait(self, target, timeout=None):
+        self.calls.append(("wait", target, timeout))
+
+    def snapshot(self, filename=None):
+        self.calls.append(("snapshot", filename))
+
+
+class FakePocoNode:
+    def __init__(self, calls, text):
+        self.calls = calls
+        self.text = text
+
+    def click(self):
+        self.calls.append(("poco_click", self.text))
+
+    def exists(self):
+        self.calls.append(("poco_exists", self.text))
+        return True
+
+
+class FakePoco:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        return FakePocoNode(self.calls, kwargs["text"])
 
 
 def test_airtest_driver_fails_clearly_when_airtest_is_not_installed(monkeypatch):
@@ -20,3 +70,86 @@ def test_airtest_driver_fails_clearly_when_airtest_is_not_installed(monkeypatch)
         driver.setup(RunContext(env="test", trigger="local"))
 
     assert "pip install airtest pocoui" in str(error.value)
+
+
+def test_load_airtest_config(tmp_path):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  device_uri: Android:///127.0.0.1:7555\n"
+        "  package: com.tencent.mm\n"
+        "  miniapp_name: 职悟空\n"
+        "  image_threshold: 0.9\n"
+        "  image_dir: assets/templates\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+
+    config = load_airtest_config(config_path)
+
+    assert config.device_uri == "Android:///127.0.0.1:7555"
+    assert config.package == "com.tencent.mm"
+    assert config.image_threshold == 0.9
+    assert config.image_dir == "assets/templates"
+    assert config.poco_enabled is False
+
+
+def test_airtest_driver_executes_steps_with_fake_api_and_poco(tmp_path):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  device_uri: Android:///127.0.0.1:7555\n"
+        "  package: com.tencent.mm\n"
+        "  miniapp_name: 职悟空\n"
+        "  poco:\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    fake_poco = FakePoco()
+    driver = AirtestDriver(
+        config_path=config_path,
+        airtest_api=fake_api,
+        poco_factory=lambda: fake_poco,
+    )
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    results = [
+        driver.execute_step(Step(action="open_app", target="微信")),
+        driver.execute_step(Step(action="open_miniapp", target="职悟空")),
+        driver.execute_step(Step(action="tap", target="我的")),
+        driver.execute_step(Step(action="input", target="手机号输入框", value="13800000000")),
+        driver.execute_step(Step(action="assert_text", target="用户昵称")),
+    ]
+
+    assert [result.status for result in results] == ["passed", "passed", "passed", "passed", "passed"]
+    assert ("connect_device", "Android:///127.0.0.1:7555") in fake_api.calls
+    assert ("start_app", "com.tencent.mm") in fake_api.calls
+    assert ("poco_click", "职悟空") in fake_poco.calls
+    assert ("poco_click", "我的") in fake_poco.calls
+    assert ("poco_click", "手机号输入框") in fake_poco.calls
+    assert ("text", "13800000000") in fake_api.calls
+    assert ("poco_exists", "用户昵称") in fake_poco.calls
+
+
+def test_airtest_driver_taps_image_template(tmp_path):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    (image_dir / "确认登录.png").write_bytes(b"fake image")
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        f"  image_dir: {image_dir.as_posix()}\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="tap", target="确认登录"))
+
+    assert result.status == "passed"
+    assert fake_api.calls[-1] == ("touch", {"filename": str(image_dir / "确认登录.png"), "threshold": 0.8})

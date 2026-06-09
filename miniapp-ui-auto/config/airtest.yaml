@@ -4,5 +4,6 @@ airtest:
   package: com.tencent.mm
   miniapp_name: 职悟空
   image_threshold: 0.8
+  image_dir: assets/images
   poco:
     enabled: true
