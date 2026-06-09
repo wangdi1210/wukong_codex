@@ -133,7 +133,7 @@ def test_airtest_driver_executes_steps_with_fake_api_and_poco(tmp_path):
     assert ("poco_exists", "用户昵称") in fake_poco.calls
 
 
-def test_airtest_driver_taps_image_template(tmp_path):
+def test_airtest_driver_taps_image_template(tmp_path, monkeypatch):
     image_dir = tmp_path / "images"
     image_dir.mkdir()
     (image_dir / "确认登录.png").write_bytes(b"fake image")
@@ -146,6 +146,7 @@ def test_airtest_driver_taps_image_template(tmp_path):
         encoding="utf-8",
     )
     fake_api = FakeAirtestApi()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
@@ -153,3 +154,21 @@ def test_airtest_driver_taps_image_template(tmp_path):
 
     assert result.status == "passed"
     assert fake_api.calls[-1] == ("touch", {"filename": str(image_dir / "确认登录.png"), "threshold": 0.8})
+
+
+def test_airtest_driver_uses_adb_device_when_config_uri_is_empty(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  device_uri: ''\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "Android:///94b63a3b")
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    assert ("connect_device", "Android:///94b63a3b") in fake_api.calls

@@ -108,9 +108,56 @@ def test_web_admin_device_check_returns_config_and_checks(tmp_path):
     )
     service = WebAdminService(case_root=tmp_path / "cases", schema_path=Path("schemas/case.schema.json"), report_dir=tmp_path / "reports")
 
-    with patch("miniapp_ui_auto.web_admin.Path", side_effect=lambda value: config_dir / "airtest.yaml" if value == "config/airtest.yaml" else Path(value)):
+    adb_result = {
+        "name": "ADB",
+        "ok": True,
+        "message": "已连接 1 台设备：real-device。",
+        "devices": [{"serial": "real-device", "status": "device"}],
+        "command": "adb devices",
+    }
+    with (
+        patch("miniapp_ui_auto.web_admin.Path", side_effect=lambda value: config_dir / "airtest.yaml" if value == "config/airtest.yaml" else Path(value)),
+        patch("miniapp_ui_auto.web_admin._check_adb_devices", return_value=adb_result),
+        patch("miniapp_ui_auto.web_admin._check_airtest_connect", return_value={"name": "Airtest", "ok": True, "message": "真实连接成功"}),
+        patch("miniapp_ui_auto.web_admin._check_poco_connect", return_value={"name": "Poco", "ok": True, "message": "真实连接成功"}),
+    ):
         result = service.check_device_environment()
 
     assert result["config"]["device_uri"] == "Android:///127.0.0.1:7555"
+    assert result["config"]["resolved_device_uri"] == "Android:///127.0.0.1:7555"
     assert any(item["name"] == "Airtest" for item in result["checks"])
     assert any(item["name"] == "ADB" for item in result["checks"])
+    assert result["ready"] is True
+
+
+def test_web_admin_device_check_uses_adb_device_when_config_missing(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "airtest.yaml").write_text(
+        "airtest:\n"
+        "  device_uri: ''\n"
+        "  poco:\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    service = WebAdminService(case_root=tmp_path / "cases", schema_path=Path("schemas/case.schema.json"), report_dir=tmp_path / "reports")
+    adb_result = {
+        "name": "ADB",
+        "ok": True,
+        "message": "已连接 1 台设备：94b63a3b。",
+        "devices": [{"serial": "94b63a3b", "status": "device"}],
+        "command": "adb devices",
+    }
+
+    with (
+        patch("miniapp_ui_auto.web_admin.Path", side_effect=lambda value: config_dir / "airtest.yaml" if value == "config/airtest.yaml" else Path(value)),
+        patch("miniapp_ui_auto.web_admin._check_adb_devices", return_value=adb_result),
+        patch("miniapp_ui_auto.web_admin._check_airtest_connect", return_value={"name": "Airtest", "ok": True, "message": "真实连接成功"}),
+        patch("miniapp_ui_auto.web_admin._check_poco_connect", return_value={"name": "Poco", "ok": True, "message": "真实连接成功"}),
+    ):
+        result = service.check_device_environment()
+
+    assert result["config"]["device_uri"] == ""
+    assert result["config"]["resolved_device_uri"] == "Android:///94b63a3b"
+    assert result["devices"] == [{"serial": "94b63a3b", "status": "device"}]
+    assert result["ready"] is True

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -115,21 +116,24 @@ class WebAdminService:
 
     def check_device_environment(self) -> dict[str, Any]:
         config = load_airtest_config(Path("config/airtest.yaml"))
-        checks = [
-            _check_python_module("Airtest", "airtest.core.api"),
-            _check_python_module("Poco", "poco.drivers.android.uiautomation"),
-        ]
         adb_check = _check_adb_devices()
-        checks.append(adb_check)
+        device_uri = config.device_uri or _device_uri_from_adb(adb_check.get("devices", []))
+        config_payload = asdict(config) | {"resolved_device_uri": device_uri}
+        checks = [
+            adb_check,
+            _check_airtest_connect(device_uri),
+            _check_poco_connect(device_uri, enabled=config.poco_enabled),
+        ]
         config_check = {
             "name": "设备配置",
-            "ok": bool(config.device_uri or adb_check.get("devices")),
-            "message": config.device_uri or "未配置 device_uri，可通过 ADB 已连接设备自动补齐。",
+            "ok": bool(device_uri),
+            "message": f"使用设备地址：{device_uri}" if device_uri else "未配置 device_uri，且 ADB 未发现可用设备。",
+            "command": "config/airtest.yaml",
         }
         checks.append(config_check)
         return {
             "checks": checks,
-            "config": asdict(config),
+            "config": config_payload,
             "devices": adb_check.get("devices", []),
             "ready": all(item["ok"] for item in checks),
         }
@@ -315,16 +319,16 @@ def _format_created_at(path: Path) -> str:
 
 def _check_python_module(name: str, module_name: str) -> dict[str, Any]:
     try:
-        __import__(module_name)
+        module = __import__(module_name)
     except ImportError as exc:
         return {"name": name, "ok": False, "message": f"未安装或不可导入：{exc}"}
-    return {"name": name, "ok": True, "message": "已安装"}
+    return {"name": name, "ok": True, "message": "已安装", "detail": getattr(module, "__file__", "")}
 
 
 def _check_adb_devices() -> dict[str, Any]:
     adb = shutil.which("adb")
     if not adb:
-        return {"name": "ADB", "ok": False, "message": "未找到 adb 命令，请安装 Android SDK platform-tools 并加入 PATH。", "devices": []}
+        return {"name": "ADB", "ok": False, "message": "未找到 adb 命令，请安装 Android SDK platform-tools 并加入 PATH。", "devices": [], "command": "adb devices"}
     try:
         result = subprocess.run(
             [adb, "devices"],
@@ -334,7 +338,7 @@ def _check_adb_devices() -> dict[str, Any]:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"name": "ADB", "ok": False, "message": f"执行 adb devices 失败：{exc}", "devices": []}
+        return {"name": "ADB", "ok": False, "message": f"执行 adb devices 失败：{exc}", "devices": [], "command": "adb devices"}
 
     devices = []
     for line in result.stdout.splitlines()[1:]:
@@ -342,9 +346,82 @@ def _check_adb_devices() -> dict[str, Any]:
         if len(parts) >= 2:
             devices.append({"serial": parts[0], "status": parts[1]})
     ok_devices = [item for item in devices if item["status"] == "device"]
+    base = {
+        "name": "ADB",
+        "command": f"{adb} devices",
+        "devices": devices,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+    }
     if ok_devices:
-        return {"name": "ADB", "ok": True, "message": f"已连接 {len(ok_devices)} 台设备。", "devices": devices}
-    return {"name": "ADB", "ok": False, "message": "未发现可用设备，请确认 USB 调试和授权弹窗。", "devices": devices}
+        return base | {"ok": True, "message": f"已连接 {len(ok_devices)} 台设备：{', '.join(item['serial'] for item in ok_devices)}。"}
+    return base | {"ok": False, "message": "未发现可用设备，请确认 USB 调试和授权弹窗。"}
+
+
+def _device_uri_from_adb(devices: list[dict[str, Any]]) -> str:
+    for device in devices:
+        if device.get("status") == "device" and device.get("serial"):
+            return f"Android:///{device['serial']}"
+    return ""
+
+
+def _check_airtest_connect(device_uri: str) -> dict[str, Any]:
+    module_check = _check_python_module("Airtest", "airtest.core.api")
+    if not module_check["ok"]:
+        return module_check
+    if not device_uri:
+        return {"name": "Airtest", "ok": False, "message": "没有可连接的设备地址，先处理 ADB 连接。", "command": "connect_device"}
+    script = """
+import json
+from airtest.core.api import connect_device
+uri = __DEVICE_URI__
+device = connect_device(uri)
+print(json.dumps({"ok": True, "uuid": getattr(device, "uuid", ""), "uri": uri}, ensure_ascii=False))
+""".replace("__DEVICE_URI__", repr(device_uri))
+    return _run_probe("Airtest", script, f"connect_device({device_uri})", timeout=20)
+
+
+def _check_poco_connect(device_uri: str, *, enabled: bool) -> dict[str, Any]:
+    if not enabled:
+        return {"name": "Poco", "ok": True, "message": "配置未启用 Poco，已跳过真实初始化。", "command": "config.airtest.poco.enabled=false"}
+    module_check = _check_python_module("Poco", "poco.drivers.android.uiautomation")
+    if not module_check["ok"]:
+        return module_check
+    if not device_uri:
+        return {"name": "Poco", "ok": False, "message": "没有可连接的设备地址，先处理 ADB 连接。", "command": "AndroidUiautomationPoco"}
+    script = """
+import json
+from airtest.core.api import connect_device
+from poco.drivers.android.uiautomation import AndroidUiautomationPoco
+uri = __DEVICE_URI__
+connect_device(uri)
+poco = AndroidUiautomationPoco(use_airtest_input=True, screenshot_each_action=False)
+print(json.dumps({"ok": True, "uri": uri, "poco": type(poco).__name__}, ensure_ascii=False))
+""".replace("__DEVICE_URI__", repr(device_uri))
+    return _run_probe("Poco", script, f"AndroidUiautomationPoco({device_uri})", timeout=25)
+
+
+def _run_probe(name: str, script: str, command: str, *, timeout: int) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"name": name, "ok": False, "message": f"真实检测超时（{timeout}s），请检查设备授权或连接状态。", "command": command}
+    except OSError as exc:
+        return {"name": name, "ok": False, "message": f"真实检测执行失败：{exc}", "command": command}
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    if result.returncode == 0:
+        detail = stdout.splitlines()[-1] if stdout else ""
+        return {"name": name, "ok": True, "message": "真实连接成功", "command": command, "stdout": detail, "stderr": stderr}
+    message = stderr or stdout or f"进程退出码 {result.returncode}"
+    return {"name": name, "ok": False, "message": message, "command": command, "stdout": stdout, "stderr": stderr}
 
 
 _INDEX_HTML = """<!doctype html>
@@ -416,6 +493,12 @@ _INDEX_HTML = """<!doctype html>
     .dot { width: 12px; height: 12px; border-radius: 50%; background: #d9d9d9; display: inline-block; }
     .dot.ok { background: #52c41a; }
     .dot.fail { background: #ff4d4f; }
+    .dot.pending { background: #d9d9d9; }
+    .check-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    .check-card { border: 1px solid #edf0f5; border-radius: 6px; padding: 12px; background: #fafcff; }
+    .check-title { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 8px; }
+    .check-message { color: #4e5969; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+    .check-command { margin-top: 8px; color: #858b99; font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
     .step-list { margin-top: 20px; }
     .step { display: grid; grid-template-columns: 44px 1fr; gap: 0; padding: 18px 0; border-bottom: 1px solid #f0f0f0; }
     .step:last-child { border-bottom: 0; }
@@ -504,11 +587,13 @@ _INDEX_HTML = """<!doctype html>
         <div class="panel">
           <h2>📱 连接设备</h2>
           <div class="check-row" id="deviceChecks">
-            <span class="check-item"><span class="dot"></span>Airtest</span>
-            <span class="check-item"><span class="dot"></span>ADB</span>
-            <span class="check-item"><span class="dot"></span>设备</span>
+            <span class="check-item"><span class="dot pending"></span>ADB 未检测</span>
+            <span class="check-item"><span class="dot pending"></span>Airtest 未检测</span>
+            <span class="check-item"><span class="dot pending"></span>Poco 未检测</span>
+            <span class="check-item"><span class="dot pending"></span>设备配置 未检测</span>
           </div>
           <button class="btn primary" onclick="checkDevice()">检查环境</button>
+          <div class="check-detail" id="checkDetail"></div>
           <div class="config-grid" id="deviceConfig"></div>
           <div class="device-table" id="deviceTable"></div>
         </div>
@@ -685,7 +770,7 @@ _INDEX_HTML = """<!doctype html>
         toast('请先选择要执行的用例');
         return;
       }
-      const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'dry-run', case_ids: ids }) });
+      const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'airtest', case_ids: ids }) });
       renderReport(data);
       document.getElementById('metricToday').textContent = data.total || 0;
       document.getElementById('runLog').textContent = `已执行 ${ids.length} 条用例：\\n${ids.join('\\n')}`;
@@ -700,6 +785,8 @@ _INDEX_HTML = """<!doctype html>
       document.getElementById('aiSummary').textContent = data.ai_summary || '暂无执行报告。';
     }
     async function checkDevice() {
+      document.getElementById('deviceChecks').innerHTML = '<span class="check-item"><span class="dot pending"></span>正在真实检测...</span>';
+      document.getElementById('checkDetail').innerHTML = '';
       const data = await api('/api/devices/check');
       renderDevice(data);
       toast(data.ready ? '设备环境检查通过' : '设备环境仍需处理');
@@ -707,9 +794,11 @@ _INDEX_HTML = """<!doctype html>
     function renderDevice(data) {
       const checks = data.checks || [];
       document.getElementById('deviceChecks').innerHTML = checks.map(item => `<span class="check-item"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${item.name}</span>`).join('');
+      document.getElementById('checkDetail').innerHTML = checks.map(item => `<div class="check-card"><div class="check-title"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${item.name}</div><div class="check-message">${item.message || ''}</div><div class="check-command">${item.command || ''}</div></div>`).join('');
       const config = data.config || {};
       const configItems = [
         ['设备地址', config.device_uri || '未配置'],
+        ['实际连接地址', config.resolved_device_uri || '未发现可用设备'],
         ['微信包名', config.package || 'com.tencent.mm'],
         ['小程序名', config.miniapp_name || '未配置'],
         ['图片目录', config.image_dir || 'assets/images'],

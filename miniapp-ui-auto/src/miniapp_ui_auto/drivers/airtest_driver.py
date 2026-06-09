@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -54,8 +56,9 @@ class AirtestDriver(AutomationDriver):
             self._airtest_api = airtest_api
         if self._template_factory is None:
             self._template_factory = self._airtest_api.Template
-        if self.config.device_uri:
-            self._airtest_api.connect_device(self.config.device_uri)
+        device_uri = self.config.device_uri or resolve_adb_device_uri()
+        if device_uri:
+            self._airtest_api.connect_device(device_uri)
         if self.config.poco_enabled:
             self._poco = self._create_poco()
 
@@ -195,3 +198,24 @@ def load_airtest_config(config_path: Path) -> AirtestConfig:
         image_dir=airtest.get("image_dir", "assets/images") or "assets/images",
         poco_enabled=bool(poco.get("enabled", True)),
     )
+
+
+def resolve_adb_device_uri() -> str:
+    adb = shutil.which("adb")
+    if not adb:
+        return ""
+    try:
+        result = subprocess.run(
+            [adb, "devices"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[1] == "device":
+            return f"Android:///{parts[0]}"
+    return ""
