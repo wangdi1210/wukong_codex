@@ -542,7 +542,7 @@ _INDEX_HTML = """<!doctype html>
       <div class="toolbar">
         <div class="left-tools">
           <button class="btn primary" onclick="openModal()">+ 新增用例</button>
-          <button class="btn success" onclick="runSelected()">执行选中</button>
+          <button class="btn success" id="runSelectedBtn" onclick="runSelected()">执行选中</button>
           <button class="btn" onclick="selectAllRows(true)">全选</button>
           <button class="btn" onclick="selectAllRows(false)">清空</button>
         </div>
@@ -718,6 +718,9 @@ _INDEX_HTML = """<!doctype html>
     async function loadCases() {
       const data = await api('/api/cases');
       allCases = data.cases;
+      if (selectedIds.size === 0) {
+        allCases.forEach(item => selectedIds.add(item.id));
+      }
       fillModuleFilter();
       renderCaseTable();
       renderMetrics();
@@ -750,6 +753,7 @@ _INDEX_HTML = """<!doctype html>
         </tr>`;
       }).join('');
       document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无用例</td></tr>';
+      document.getElementById('headCheck').checked = filteredCases().length > 0 && filteredCases().every(item => selectedIds.has(item.id));
     }
     function renderMetrics() {
       document.getElementById('metricTotal').textContent = allCases.length;
@@ -767,14 +771,35 @@ _INDEX_HTML = """<!doctype html>
     async function runSelected() {
       const ids = [...selectedIds];
       if (ids.length === 0) {
+        document.getElementById('runLog').textContent = '未执行：请先勾选要执行的用例。';
         toast('请先选择要执行的用例');
         return;
       }
-      const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'airtest', case_ids: ids }) });
-      renderReport(data);
-      document.getElementById('metricToday').textContent = data.total || 0;
-      document.getElementById('runLog').textContent = `已执行 ${ids.length} 条用例：\\n${ids.join('\\n')}`;
-      toast('执行完成');
+      const runButton = document.getElementById('runSelectedBtn');
+      runButton.disabled = true;
+      runButton.textContent = '执行中...';
+      document.getElementById('runLog').textContent = `正在通过 Airtest 真机执行 ${ids.length} 条用例：\\n${ids.join('\\n')}`;
+      switchTab('runs');
+      try {
+        const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'airtest', case_ids: ids }) });
+        renderReport(data);
+        document.getElementById('metricToday').textContent = data.total || 0;
+        const failedDetails = (data.cases || [])
+          .filter(item => item.status === 'failed')
+          .map(item => {
+            const failedStep = (item.steps || []).find(step => step.status === 'failed');
+            const reason = failedStep ? `${failedStep.action} ${failedStep.target}：${failedStep.message}` : (item.failure_summary || '未返回失败原因');
+            return `${item.case_id} - ${reason}`;
+          });
+        document.getElementById('runLog').textContent = `已执行 ${ids.length} 条用例：\\n${ids.join('\\n')}\\n\\n通过：${data.passed || 0}，失败：${data.failed || 0}，跳过：${data.skipped || 0}${failedDetails.length ? `\\n\\n失败原因：\\n${failedDetails.join('\\n')}` : ''}`;
+        toast('执行完成，请查看执行记录和测试报告');
+      } catch (error) {
+        document.getElementById('runLog').textContent = `执行失败：${error.message}`;
+        toast(`执行失败：${error.message}`);
+      } finally {
+        runButton.disabled = false;
+        runButton.textContent = '执行选中';
+      }
     }
     async function loadReport() { renderReport(await api('/api/reports/latest')); }
     function renderReport(data) {
