@@ -16,6 +16,11 @@ def summarize_run(case_results: list[CaseResult]) -> str:
 
 def classify_failure(messages: list[str]) -> tuple[str, str]:
     combined = " ".join(messages)
+    if "ConnectionResetError" in combined or "Connection broken" in combined or "10054" in combined:
+        return (
+            "设备/Poco连接问题",
+            "Airtest/Poco 与手机端服务连接被断开，请检查手机亮屏、USB 连接、PocoService 状态，或将动作描述改成明确控件/图片/滑动步骤。",
+        )
     if "not installed" in combined or "environment" in combined:
         return "环境问题", "执行环境或依赖未准备完成。"
     if "assert" in combined.lower():

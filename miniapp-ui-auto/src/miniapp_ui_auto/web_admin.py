@@ -823,14 +823,7 @@ _INDEX_HTML = """<!doctype html>
         const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'airtest', case_ids: ids }) });
         renderReport(data);
         document.getElementById('metricToday').textContent = data.total || 0;
-        const failedDetails = (data.cases || [])
-          .filter(item => item.status === 'failed')
-          .map(item => {
-            const failedStep = (item.steps || []).find(step => step.status === 'failed');
-            const reason = failedStep ? `${failedStep.action} ${failedStep.target}：${failedStep.message}` : (item.failure_summary || '未返回失败原因');
-            return `${item.case_id} - ${reason}`;
-          });
-        document.getElementById('runLog').textContent = `已执行 ${ids.length} 条用例：\\n${ids.join('\\n')}\\n\\n通过：${data.passed || 0}，失败：${data.failed || 0}，跳过：${data.skipped || 0}${failedDetails.length ? `\\n\\n失败原因：\\n${failedDetails.join('\\n')}` : ''}`;
+        document.getElementById('runLog').textContent = formatRunLog(data, ids);
         toast('执行完成，请查看执行记录和测试报告');
       } catch (error) {
         document.getElementById('runLog').textContent = `执行失败：${error.message}`;
@@ -841,6 +834,71 @@ _INDEX_HTML = """<!doctype html>
       }
     }
     async function loadReport() { renderReport(await api('/api/reports/latest')); }
+    function formatRunLog(data, selectedIds) {
+      const lines = [];
+      const cases = data.cases || [];
+      lines.push(`执行完成：选中 ${selectedIds.length} 条，实际执行 ${data.total || cases.length || 0} 条`);
+      lines.push(`通过：${data.passed || 0}，失败：${data.failed || 0}，跳过：${data.skipped || 0}`);
+      if (data.ai_summary) {
+        lines.push('');
+        lines.push(`摘要：${data.ai_summary}`);
+      }
+      lines.push('');
+      lines.push('失败定位：');
+      const failedCases = cases.filter(item => item.status === 'failed');
+      if (failedCases.length === 0) {
+        lines.push('无失败用例');
+      } else {
+        failedCases.forEach(item => {
+          const failedStepIndex = (item.steps || []).findIndex(step => step.status === 'failed');
+          const failedStep = failedStepIndex >= 0 ? item.steps[failedStepIndex] : null;
+          lines.push(`- ${item.case_id} / ${item.title || ''}`);
+          if (item.failure_category) lines.push(`  分类：${item.failure_category}`);
+          if (item.failure_summary) lines.push(`  摘要：${item.failure_summary}`);
+          if (failedStep) {
+            lines.push(`  失败步骤：#${failedStepIndex + 1} ${failedStep.action} ${failedStep.target}`);
+            lines.push(`  原始错误：${failedStep.message || '未返回错误信息'}`);
+            const hint = explainRunError(failedStep.message || '');
+            if (hint) lines.push(`  可能原因：${hint}`);
+          }
+        });
+      }
+      lines.push('');
+      lines.push('步骤明细：');
+      if (cases.length === 0) {
+        lines.push('无用例结果返回');
+      }
+      cases.forEach(item => {
+        lines.push(`用例：${item.case_id} | ${item.title || ''} | ${item.status}`);
+        lines.push(`模块：${item.module || '-'}，优先级：${item.priority || '-'}，标签：${(item.tags || []).join(', ') || '-'}`);
+        (item.steps || []).forEach((step, index) => {
+          lines.push(`  #${index + 1} [${step.status}] ${step.action} ${step.target}`);
+          if (step.message) lines.push(`      message: ${step.message}`);
+          if (step.artifact_paths && step.artifact_paths.length) {
+            lines.push(`      artifacts: ${step.artifact_paths.join(', ')}`);
+          }
+        });
+        if (item.failure_category || item.failure_summary) {
+          lines.push(`  failure_category: ${item.failure_category || '-'}`);
+          lines.push(`  failure_summary: ${item.failure_summary || '-'}`);
+        }
+        lines.push('');
+      });
+      return lines.join('\\n');
+    }
+    function explainRunError(message) {
+      if (!message) return '';
+      if (message.includes('ConnectionResetError') || message.includes('Connection broken') || message.includes('10054')) {
+        return 'Poco/Airtest 与手机端 PocoService 的连接被远端断开。常见原因：手机端 PocoService 被系统杀掉或重启、手机息屏/锁屏/USB 瞬断、微信页面切换导致 UIAutomator 服务不稳定，或把“下拉/滑动”等动作描述误当成 Poco 文本控件点击。建议先在设备页重新检查环境，保持手机亮屏，再把该步骤改成明确控件点击、图片点击或后续支持的滑动动作。';
+      }
+      if (message.includes('Poco target not found')) {
+        return 'Poco 没找到目标文本控件，检查控件文案是否真实存在，或改用截图模板定位。';
+      }
+      if (message.includes('Image target not found')) {
+        return '图片模板未匹配到目标，检查截图模板、分辨率和 image_threshold。';
+      }
+      return '';
+    }
     function renderReport(data) {
       document.getElementById('reportTotal').textContent = data.total || 0;
       document.getElementById('reportPassed').textContent = data.passed || 0;
