@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Miniapp UI Automation Case",
+  "type": "object",
+  "required": ["id", "title", "platform", "driver", "module", "priority", "tags", "owner", "version", "steps", "assertions"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+    "title": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string", "enum": ["miniapp"] },
+    "driver": { "type": "string", "enum": ["dry-run", "minium"] },
+    "module": { "type": "string", "minLength": 1 },
+    "priority": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "owner": { "type": "string", "minLength": 1 },
+    "version": { "type": "integer", "minimum": 1 },
+    "preconditions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["action", "target"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["open_page", "tap", "input", "wait", "assert_text", "assert_element", "assert_data", "screenshot", "mock", "set_storage"]
+          },
+          "target": { "type": "string", "minLength": 1 },
+          "value": {},
+          "timeout_ms": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "target", "expected"],
+        "properties": {
+          "type": { "type": "string", "enum": ["text", "element", "data", "api"] },
+          "target": { "type": "string", "minLength": 1 },
+          "expected": {}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

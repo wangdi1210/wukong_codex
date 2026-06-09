@@ -1,0 +1,36 @@
+id: miniapp_login_001
+title: 手机号验证码登录成功
+platform: miniapp
+driver: dry-run
+module: login
+priority: P0
+tags:
+  - smoke
+  - regression
+owner: qa
+version: 1
+preconditions:
+  - 已配置测试环境
+  - 验证码服务使用固定验证码
+steps:
+  - action: open_page
+    target: pages/index/index
+  - action: tap
+    target: 我的
+  - action: tap
+    target: 登录
+  - action: input
+    target: 手机号输入框
+    value: "13800000000"
+  - action: input
+    target: 验证码输入框
+    value: "123456"
+  - action: tap
+    target: 确认登录
+assertions:
+  - type: text
+    target: 用户昵称
+    expected: visible
+  - type: api
+    target: login
+    expected: success

@@ -1,0 +1,5 @@
+minium:
+  cli_path: ""
+  project_path: ""
+  platform: ide
+  device_desire: {}
