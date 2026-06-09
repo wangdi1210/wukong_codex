@@ -59,6 +59,9 @@ class WebAdminService:
                 drivers=tuple(payload.get("case_drivers") or []),
             ),
         )
+        case_ids = set(payload.get("case_ids") or [])
+        if case_ids:
+            selected = [case for case in selected if case.id in case_ids]
         summary = run_cases(
             cases=selected,
             driver=create_driver(payload.get("driver", "dry-run")),
@@ -162,6 +165,8 @@ def _case_record(case: TestCase) -> dict[str, Any]:
         "owner": case.owner,
         "version": case.version,
         "source_path": case.source_path,
+        "status": "启用",
+        "created_at": _format_created_at(Path(case.source_path)),
     }
 
 
@@ -172,120 +177,288 @@ def _required(payload: dict[str, Any], key: str) -> str:
     return value
 
 
+def _format_created_at(path: Path) -> str:
+    try:
+        from datetime import datetime
+
+        return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError:
+        return "-"
+
+
 _INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>小程序 UI 自动化管理台</title>
+  <title>职悟空 · UI自动化测试</title>
   <style>
-    :root { color-scheme: light; font-family: Arial, "Microsoft YaHei", sans-serif; }
-    body { margin: 0; background: #f6f7f9; color: #20242a; }
-    header { padding: 18px 24px; background: #14213d; color: #fff; }
-    h1 { margin: 0; font-size: 20px; letter-spacing: 0; }
-    main { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px; padding: 16px; }
-    section { background: #fff; border: 1px solid #d8dde6; border-radius: 8px; padding: 16px; }
-    h2 { margin: 0 0 12px; font-size: 16px; }
-    label { display: block; margin: 10px 0 4px; font-size: 13px; color: #4d5562; }
-    input, select, textarea { width: 100%; box-sizing: border-box; border: 1px solid #bcc5d2; border-radius: 6px; padding: 8px; font: inherit; }
-    textarea { min-height: 160px; resize: vertical; }
-    button { border: 0; border-radius: 6px; padding: 9px 12px; background: #1f7a8c; color: #fff; cursor: pointer; font-weight: 600; }
-    button.secondary { background: #586069; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { border-bottom: 1px solid #edf0f4; padding: 8px; text-align: left; vertical-align: top; }
-    th { color: #4d5562; background: #f8fafc; }
-    code, pre { background: #f1f4f8; border-radius: 6px; }
-    pre { padding: 10px; overflow: auto; min-height: 80px; }
-    .summary { display: grid; grid-template-columns: repeat(4, minmax(80px, 1fr)); gap: 8px; }
-    .metric { background: #f8fafc; border: 1px solid #e5e9f0; border-radius: 6px; padding: 10px; }
-    .metric strong { display: block; font-size: 20px; }
-    @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+    :root { font-family: Arial, "Microsoft YaHei", sans-serif; color: #1f2329; background: #f4f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f6fa; }
+    .topbar { height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: #fff; border-bottom: 1px solid #e5e6eb; }
+    .brand { color: #1677ff; font-size: 18px; font-weight: 700; letter-spacing: 0; }
+    .nav { display: flex; gap: 34px; height: 100%; align-items: center; }
+    .nav button { height: 100%; border: 0; background: transparent; color: #303133; font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; border-radius: 0; padding: 0; }
+    .nav button.active { color: #1677ff; border-bottom-color: #1677ff; font-weight: 600; }
+    main { max-width: 1354px; margin: 0 auto; padding: 24px 0 48px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .metric-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); padding: 24px; min-height: 116px; border: 1px solid #edf0f5; }
+    .metric-label { color: #858b99; font-size: 14px; margin-bottom: 18px; }
+    .metric-value { font-size: 30px; font-weight: 700; line-height: 1; }
+    .blue { color: #1677ff; } .green { color: #52c41a; } .orange { color: #fa8c16; } .dark { color: #1f2329; }
+    .toolbar, .table-card, .panel { background: #fff; border-radius: 8px; border: 1px solid #edf0f5; box-shadow: 0 1px 3px rgba(15, 23, 42, .04); }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; margin-bottom: 14px; gap: 16px; }
+    .left-tools, .right-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    button, select, input, textarea { font: inherit; }
+    .btn { border: 1px solid #d9d9d9; background: #fff; color: #1f2329; height: 36px; padding: 0 18px; border-radius: 4px; cursor: pointer; }
+    .btn.primary { background: #1677ff; border-color: #1677ff; color: #fff; }
+    .btn.success { background: #52c41a; border-color: #52c41a; color: #fff; }
+    .btn.text { border: 0; background: transparent; color: #1677ff; padding: 0 6px; height: auto; }
+    select, input { height: 34px; border: 1px solid #d9d9d9; border-radius: 4px; padding: 0 12px; background: #fff; min-width: 102px; }
+    .search { width: 200px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    thead { background: #fafafa; }
+    th, td { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; text-align: left; white-space: nowrap; }
+    th { color: #333; font-weight: 600; }
+    tbody tr:hover { background: #fafcff; }
+    .checkbox { width: 16px; height: 16px; accent-color: #1677ff; }
+    .tag { display: inline-block; border-radius: 2px; padding: 3px 8px; font-size: 12px; line-height: 18px; }
+    .tag-p0 { color: #cf1322; background: #fff1f0; }
+    .tag-p1 { color: #f5222d; background: #fff1f0; }
+    .tag-p2 { color: #fa8c16; background: #fff7e6; }
+    .tag-p3 { color: #1677ff; background: #e6f4ff; }
+    .status-on { color: #52c41a; background: #f6ffed; }
+    .empty { padding: 36px; text-align: center; color: #858b99; }
+    .tab-page { display: none; }
+    .tab-page.active { display: block; }
+    .panel { padding: 22px 24px; }
+    .panel h2 { margin: 0 0 16px; font-size: 18px; }
+    pre { background: #f6f8fb; border: 1px solid #e8edf3; border-radius: 6px; padding: 14px; min-height: 120px; overflow: auto; white-space: pre-wrap; }
+    .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); align-items: center; justify-content: center; z-index: 10; }
+    .modal-mask.show { display: flex; }
+    .modal { width: 600px; max-width: calc(100vw - 32px); background: #fff; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+    .modal-head { height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #f0f0f0; }
+    .modal-title { font-size: 18px; font-weight: 700; }
+    .close { border: 0; background: transparent; font-size: 24px; color: #8c8c8c; cursor: pointer; }
+    .modal-body { padding: 24px; }
+    .modal-foot { height: 68px; display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 0 32px; border-top: 1px solid #f0f0f0; }
+    label { display: block; margin: 0 0 8px; color: #555; font-size: 14px; }
+    .field { margin-bottom: 18px; }
+    .field input, .field select, .field textarea { width: 100%; min-width: 0; }
+    .field textarea { height: 80px; padding: 10px 12px; resize: vertical; border: 1px solid #d9d9d9; border-radius: 4px; }
+    .toast { position: fixed; right: 24px; bottom: 24px; background: #1f2329; color: #fff; padding: 12px 16px; border-radius: 6px; display: none; z-index: 20; }
+    .toast.show { display: block; }
+    @media (max-width: 900px) {
+      main { padding: 16px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { align-items: stretch; flex-direction: column; }
+      .right-tools { justify-content: flex-start; }
+      .table-card { overflow-x: auto; }
+      .topbar { align-items: flex-start; height: auto; gap: 12px; flex-direction: column; padding: 14px 16px; }
+      .nav { height: 40px; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>小程序 UI 自动化管理台</h1></header>
+  <header class="topbar">
+    <div class="brand">职悟空 · UI自动化测试</div>
+    <nav class="nav">
+      <button class="active" data-tab="cases" onclick="switchTab('cases')">用例管理</button>
+      <button data-tab="runs" onclick="switchTab('runs')">执行记录</button>
+      <button data-tab="reports" onclick="switchTab('reports')">测试报告</button>
+      <button data-tab="devices" onclick="switchTab('devices')">📱 设备</button>
+    </nav>
+  </header>
   <main>
-    <section>
-      <h2>自然语言生成用例</h2>
-      <div class="row">
-        <div><label>用例 ID</label><input id="caseId" value="airtest_login_generated_001"></div>
-        <div><label>模块</label><input id="module" value="login"></div>
+    <section id="cases" class="tab-page active">
+      <div class="metrics">
+        <div class="metric-card"><div class="metric-label">总用例数</div><div class="metric-value blue" id="metricTotal">0</div></div>
+        <div class="metric-card"><div class="metric-label">已启用</div><div class="metric-value green" id="metricEnabled">0</div></div>
+        <div class="metric-card"><div class="metric-label">已禁用</div><div class="metric-value orange" id="metricDisabled">0</div></div>
+        <div class="metric-card"><div class="metric-label">今日执行</div><div class="metric-value dark" id="metricToday">0</div></div>
       </div>
-      <label>标题</label><input id="title" value="手机号验证码登录成功">
-      <div class="row">
-        <div><label>优先级</label><select id="priority"><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select></div>
-        <div><label>标签</label><input id="tags" value="smoke,ai-generated"></div>
+      <div class="toolbar">
+        <div class="left-tools">
+          <button class="btn primary" onclick="openModal()">+ 新增用例</button>
+          <button class="btn success" onclick="runSelected()">执行选中</button>
+          <button class="btn" onclick="selectAllRows(true)">全选</button>
+          <button class="btn" onclick="selectAllRows(false)">清空</button>
+        </div>
+        <div class="right-tools">
+          <select id="moduleFilter" onchange="renderCaseTable()"><option value="">全部模块</option></select>
+          <select id="priorityFilter" onchange="renderCaseTable()"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
+          <input class="search" id="searchInput" oninput="renderCaseTable()" placeholder="搜索用例...">
+        </div>
       </div>
-      <label>自然语言步骤</label>
-      <textarea id="text">打开 微信。进入 职悟空小程序。点击 我的。点击 登录。输入 手机号输入框：13800000000。输入 验证码输入框：123456。点击 确认登录。断言 用户昵称</textarea>
-      <div class="actions">
-        <button onclick="generateCase()">生成 YAML</button>
-        <button class="secondary" onclick="loadCases()">刷新列表</button>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th><input class="checkbox" type="checkbox" id="headCheck" onchange="selectAllRows(this.checked)"></th>
+              <th>ID</th><th>用例标题</th><th>模块</th><th>优先级</th><th>状态</th><th>创建时间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="caseRows"></tbody>
+        </table>
       </div>
-      <pre id="generateResult">等待生成。</pre>
     </section>
-    <section>
-      <h2>执行控制</h2>
-      <div class="row">
-        <div><label>执行 Driver</label><select id="runDriver"><option value="dry-run">dry-run</option><option value="airtest">airtest</option><option value="poco">poco</option></select></div>
-        <div><label>执行标签</label><input id="runTags" value="smoke"></div>
+    <section id="runs" class="tab-page">
+      <div class="panel">
+        <h2>执行记录</h2>
+        <pre id="runLog">暂无执行记录。请在“用例管理”中执行选中用例。</pre>
       </div>
-      <div class="actions">
-        <button onclick="runCases()">执行用例</button>
-        <button class="secondary" onclick="loadReport()">刷新报告</button>
+    </section>
+    <section id="reports" class="tab-page">
+      <div class="panel">
+        <h2>测试报告</h2>
+        <div class="metrics">
+          <div class="metric-card"><div class="metric-label">执行总数</div><div class="metric-value blue" id="reportTotal">0</div></div>
+          <div class="metric-card"><div class="metric-label">通过</div><div class="metric-value green" id="reportPassed">0</div></div>
+          <div class="metric-card"><div class="metric-label">失败</div><div class="metric-value orange" id="reportFailed">0</div></div>
+          <div class="metric-card"><div class="metric-label">跳过</div><div class="metric-value dark" id="reportSkipped">0</div></div>
+        </div>
+        <pre id="aiSummary">暂无执行报告。</pre>
       </div>
-      <div class="summary" id="summary"></div>
-      <pre id="aiSummary">暂无执行报告。</pre>
-      <h2>用例列表</h2>
-      <div id="caseTable"></div>
+    </section>
+    <section id="devices" class="tab-page">
+      <div class="panel">
+        <h2>设备配置</h2>
+        <pre>当前通过 config/airtest.yaml 管理设备。
+示例：
+device_uri: Android:///127.0.0.1:7555
+package: com.tencent.mm
+miniapp_name: 职悟空
+poco.enabled: true</pre>
+      </div>
     </section>
   </main>
+  <div class="modal-mask" id="modalMask">
+    <div class="modal">
+      <div class="modal-head"><div class="modal-title">新增用例</div><button class="close" onclick="closeModal()">×</button></div>
+      <div class="modal-body">
+        <div class="field"><label>用例标题 *</label><input id="formTitle" placeholder="请输入用例标题"></div>
+        <div class="field"><label>所属模块</label><input id="formModule" placeholder="例如：登录、首页、个人中心"></div>
+        <div class="field"><label>优先级</label><select id="formPriority"><option value="P2">P2 - 中</option><option value="P0">P0 - 阻塞</option><option value="P1">P1 - 高</option><option value="P3">P3 - 低</option></select></div>
+        <div class="field"><label>前置条件</label><textarea id="formPreconditions" placeholder="执行此用例前需要满足的条件"></textarea></div>
+        <div class="field"><label>测试步骤 *</label><textarea id="formSteps" placeholder="1. 打开微信&#10;2. 进入职悟空小程序&#10;3. 点击我的&#10;4. 输入手机号"></textarea></div>
+        <div class="field"><label>预期结果 *</label><textarea id="formExpected" placeholder="描述期望看到的结果"></textarea></div>
+      </div>
+      <div class="modal-foot"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="saveCase()">保存</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
   <script>
+    let allCases = [];
+    let selectedIds = new Set();
+
     async function api(path, options) {
       const response = await fetch(path, options);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || response.statusText);
       return data;
     }
-    function tagsFrom(id) {
-      return document.getElementById(id).value.split(',').map(v => v.trim()).filter(Boolean);
+    function switchTab(tab) {
+      document.querySelectorAll('.nav button').forEach(item => item.classList.toggle('active', item.dataset.tab === tab));
+      document.querySelectorAll('.tab-page').forEach(item => item.classList.toggle('active', item.id === tab));
+      if (tab === 'reports') loadReport();
     }
-    async function generateCase() {
-      const payload = {
-        case_id: document.getElementById('caseId').value,
-        title: document.getElementById('title').value,
-        module: document.getElementById('module').value,
-        priority: document.getElementById('priority').value,
-        tags: tagsFrom('tags'),
-        text: document.getElementById('text').value,
-        driver: 'airtest'
-      };
-      try {
-        const data = await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
-        document.getElementById('generateResult').textContent = JSON.stringify(data, null, 2);
-        await loadCases();
-      } catch (error) {
-        document.getElementById('generateResult').textContent = error.message;
+    function toast(message) {
+      const el = document.getElementById('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2400);
+    }
+    function openModal() { document.getElementById('modalMask').classList.add('show'); }
+    function closeModal() { document.getElementById('modalMask').classList.remove('show'); }
+    function splitLines(value) { return value.split(/\\n+/).map(item => item.replace(/^\\s*\\d+[.、)]\\s*/, '').trim()).filter(Boolean); }
+    function caseIdFrom(title) {
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+      return `airtest_case_${stamp}`;
+    }
+    async function saveCase() {
+      const title = document.getElementById('formTitle').value.trim();
+      const module = document.getElementById('formModule').value.trim() || '默认模块';
+      const steps = splitLines(document.getElementById('formSteps').value);
+      const expected = splitLines(document.getElementById('formExpected').value);
+      if (!title || steps.length === 0 || expected.length === 0) {
+        toast('请填写用例标题、测试步骤和预期结果');
+        return;
       }
+      const text = [...splitLines(document.getElementById('formPreconditions').value).map(item => `前置条件 ${item}`), ...steps, ...expected.map(item => `断言 ${item}`)].join('。');
+      const payload = { case_id: caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest' };
+      await api('/api/cases/generate', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+      closeModal();
+      toast('用例已保存');
+      await loadCases();
     }
     async function loadCases() {
       const data = await api('/api/cases');
-      const rows = data.cases.map(item => `<tr><td>${item.id}</td><td>${item.title}</td><td>${item.module}</td><td>${item.priority}</td><td>${item.tags.join(', ')}</td><td>${item.driver}</td></tr>`).join('');
-      document.getElementById('caseTable').innerHTML = `<table><thead><tr><th>ID</th><th>标题</th><th>模块</th><th>优先级</th><th>标签</th><th>Driver</th></tr></thead><tbody>${rows}</tbody></table>`;
+      allCases = data.cases;
+      fillModuleFilter();
+      renderCaseTable();
+      renderMetrics();
     }
-    async function runCases() {
-      const payload = { driver: document.getElementById('runDriver').value, tags: tagsFrom('runTags') };
-      const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
+    function fillModuleFilter() {
+      const current = document.getElementById('moduleFilter').value;
+      const modules = [...new Set(allCases.map(item => item.module))].sort();
+      document.getElementById('moduleFilter').innerHTML = '<option value="">全部模块</option>' + modules.map(item => `<option>${item}</option>`).join('');
+      document.getElementById('moduleFilter').value = current;
+    }
+    function filteredCases() {
+      const module = document.getElementById('moduleFilter').value;
+      const priority = document.getElementById('priorityFilter').value;
+      const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+      return allCases.filter(item => (!module || item.module === module) && (!priority || item.priority === priority) && (!keyword || `${item.id} ${item.title} ${item.module}`.toLowerCase().includes(keyword)));
+    }
+    function renderCaseTable() {
+      const rows = filteredCases().map((item, index) => {
+        const checked = selectedIds.has(item.id) ? 'checked' : '';
+        return `<tr>
+          <td><input class="checkbox row-check" type="checkbox" ${checked} onchange="toggleSelect('${item.id}', this.checked)"></td>
+          <td>${index + 1}</td>
+          <td>${item.title}</td>
+          <td>${item.module}</td>
+          <td><span class="tag tag-${item.priority.toLowerCase()}">${item.priority}</span></td>
+          <td><span class="tag status-on">${item.status}</span></td>
+          <td>${item.created_at}</td>
+          <td><button class="btn text" onclick="toast('编辑能力下一步接入')">编辑</button><button class="btn text" onclick="toast('删除能力下一步接入')">删除</button></td>
+        </tr>`;
+      }).join('');
+      document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无用例</td></tr>';
+    }
+    function renderMetrics() {
+      document.getElementById('metricTotal').textContent = allCases.length;
+      document.getElementById('metricEnabled').textContent = allCases.length;
+      document.getElementById('metricDisabled').textContent = 0;
+    }
+    function toggleSelect(id, checked) {
+      checked ? selectedIds.add(id) : selectedIds.delete(id);
+    }
+    function selectAllRows(checked) {
+      filteredCases().forEach(item => checked ? selectedIds.add(item.id) : selectedIds.delete(item.id));
+      document.getElementById('headCheck').checked = checked;
+      renderCaseTable();
+    }
+    async function runSelected() {
+      const ids = [...selectedIds];
+      if (ids.length === 0) {
+        toast('请先选择要执行的用例');
+        return;
+      }
+      const data = await api('/api/runs', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ driver: 'dry-run', case_ids: ids }) });
       renderReport(data);
-      await loadCases();
+      document.getElementById('metricToday').textContent = data.total || 0;
+      document.getElementById('runLog').textContent = `已执行 ${ids.length} 条用例：\\n${ids.join('\\n')}`;
+      toast('执行完成');
     }
-    async function loadReport() {
-      renderReport(await api('/api/reports/latest'));
-    }
+    async function loadReport() { renderReport(await api('/api/reports/latest')); }
     function renderReport(data) {
-      document.getElementById('summary').innerHTML = ['total', 'passed', 'failed', 'skipped'].map(key => `<div class="metric"><span>${key}</span><strong>${data[key] || 0}</strong></div>`).join('');
+      document.getElementById('reportTotal').textContent = data.total || 0;
+      document.getElementById('reportPassed').textContent = data.passed || 0;
+      document.getElementById('reportFailed').textContent = data.failed || 0;
+      document.getElementById('reportSkipped').textContent = data.skipped || 0;
       document.getElementById('aiSummary').textContent = data.ai_summary || '暂无执行报告。';
     }
     loadCases();
