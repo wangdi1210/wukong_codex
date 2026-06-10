@@ -31,6 +31,7 @@ class WebAdminService:
         self.case_root = case_root
         self.schema_path = schema_path
         self.report_dir = report_dir
+        self._last_device_environment: dict[str, Any] | None = None
 
     def list_cases(self) -> list[dict[str, Any]]:
         return [_case_record(case) for case in load_cases(self.case_root, self.schema_path)]
@@ -131,11 +132,32 @@ class WebAdminService:
             "command": "config/airtest.yaml",
         }
         checks.append(config_check)
-        return {
+        result = {
             "checks": checks,
             "config": config_payload,
             "devices": adb_check.get("devices", []),
             "ready": all(item["ok"] for item in checks),
+            "checked_at": _now_text(),
+        }
+        self._last_device_environment = result
+        return result
+
+    def device_environment_status(self) -> dict[str, Any]:
+        if self._last_device_environment is not None:
+            return self._last_device_environment | {"cached": True}
+        config = load_airtest_config(Path("config/airtest.yaml"))
+        return {
+            "checks": [
+                {"name": "ADB", "ok": False, "message": "未检测，请点击“检查环境”进行真实检测。"},
+                {"name": "Airtest", "ok": False, "message": "未检测，请点击“检查环境”进行真实检测。"},
+                {"name": "Poco", "ok": False, "message": "未检测，请点击“检查环境”进行真实检测。"},
+                {"name": "设备配置", "ok": bool(config.device_uri), "message": "已读取配置，尚未进行真实连接检测。"},
+            ],
+            "config": asdict(config) | {"resolved_device_uri": config.device_uri},
+            "devices": [],
+            "ready": False,
+            "cached": False,
+            "checked_at": "",
         }
 
     def _find_case(self, case_id: str) -> TestCase:
@@ -172,6 +194,9 @@ class WebAdminHandler(BaseHTTPRequestHandler):
             return
         if route == "/api/reports/latest":
             self._send_json(self.web_service.load_summary())
+            return
+        if route == "/api/devices/status":
+            self._send_json(self.web_service.device_environment_status())
             return
         if route == "/api/devices/check":
             self._send_json(self.web_service.check_device_environment())
@@ -318,6 +343,12 @@ def _format_created_at(path: Path) -> str:
         return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     except OSError:
         return "-"
+
+
+def _now_text() -> str:
+    from datetime import datetime
+
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _check_python_module(name: str, module_name: str) -> dict[str, Any]:

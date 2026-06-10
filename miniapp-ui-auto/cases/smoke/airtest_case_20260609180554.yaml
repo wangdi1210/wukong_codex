@@ -1,0 +1,24 @@
+id: airtest_case_20260609180554
+title: 打开微信
+platform: miniapp
+driver: airtest
+module: 初始化
+priority: P1
+tags:
+- smoke
+owner: qa
+version: 1
+preconditions: []
+steps:
+- action: open_app
+  target: 微信
+- action: swipe
+  target: down
+- action: tap
+  target: 搜索 职悟空 小程序
+- action: tap
+  target: 进入
+assertions:
+- type: text
+  target: 进入职悟空小程序
+  expected: visible
