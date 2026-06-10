@@ -891,7 +891,7 @@ _INDEX_HTML = """<!doctype html>
     }
     function explainRunError(message) {
       if (!message) return '';
-      if (message.includes('ConnectionResetError') || message.includes('Connection broken') || message.includes('10054')) {
+      if (message.includes('ConnectionResetError') || message.includes('Connection broken') || message.includes('10054') || message.includes('Expecting value: line 1 column 1')) {
         return 'Poco/Airtest 与手机端 PocoService 的连接被远端断开。常见原因：手机端 PocoService 被系统杀掉或重启、手机息屏/锁屏/USB 瞬断、微信页面切换导致 UIAutomator 服务不稳定，或把“下拉/滑动”等动作描述误当成 Poco 文本控件点击。建议先在设备页重新检查环境，保持手机亮屏，再把该步骤改成明确控件点击、图片点击或后续支持的滑动动作。';
       }
       if (message.includes('Poco target not found')) {

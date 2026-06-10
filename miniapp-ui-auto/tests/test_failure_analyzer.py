@@ -10,3 +10,10 @@ def test_classify_connection_reset_as_device_poco_issue():
 
     assert category == "设备/Poco连接问题"
     assert "Poco" in summary
+
+
+def test_classify_empty_poco_response_as_device_poco_issue():
+    category, summary = classify_failure(["Expecting value: line 1 column 1 (char 0)"])
+
+    assert category == "设备/Poco连接问题"
+    assert "Poco" in summary
