@@ -14,10 +14,8 @@ steps:
   target: 微信
 - action: swipe
   target: down
-- action: tap
-  target: 搜索 职悟空 小程序
-- action: tap
-  target: 进入
+- action: search_miniapp
+  target: 职悟空
 assertions:
 - type: text
   target: 进入职悟空小程序

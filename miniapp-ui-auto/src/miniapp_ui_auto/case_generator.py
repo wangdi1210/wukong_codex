@@ -36,7 +36,10 @@ def generate_case_from_text(
         elif _looks_like_assertion(line):
             assertions.append(_parse_assertion(line))
         else:
-            steps.append(_parse_step(line))
+            step = _parse_step(line)
+            if _is_redundant_miniapp_entry_step(step, steps):
+                continue
+            steps.append(step)
 
     if not steps:
         raise ValueError("自然语言内容中没有可生成的执行步骤。")
@@ -103,6 +106,9 @@ def _parse_step(line: str) -> dict[str, Any]:
     swipe_direction = _parse_swipe_direction(line)
     if swipe_direction:
         return {"action": "swipe", "target": swipe_direction}
+    miniapp_search = _parse_miniapp_search(line)
+    if miniapp_search:
+        return {"action": "search_miniapp", "target": miniapp_search}
     if line.startswith(("打开", "进入", "访问")):
         target = _extract_target(line, ("打开", "进入", "访问"))
         if target in ("微信", "WeChat", "wechat"):
@@ -135,6 +141,20 @@ def _parse_swipe_direction(line: str) -> str:
     if any(keyword in line for keyword in ("右滑", "向右滑", "往右滑")):
         return "right"
     return ""
+
+
+def _parse_miniapp_search(line: str) -> str:
+    if "小程序" not in line or not any(keyword in line for keyword in ("搜索", "查找", "搜")):
+        return ""
+    target = _strip_known_prefixes(line, ("搜索", "查找", "搜一下", "搜"))
+    target = target.replace("小程序", "").replace("并进入", "").replace("进入", "").strip(" ：:，,。")
+    return target
+
+
+def _is_redundant_miniapp_entry_step(step: dict[str, Any], steps: list[dict[str, Any]]) -> bool:
+    if not steps or steps[-1].get("action") != "search_miniapp":
+        return False
+    return step.get("action") == "tap" and step.get("target") in ("进入", "进入小程序", "打开", "打开小程序")
 
 
 def _parse_input(line: str) -> tuple[str, str]:

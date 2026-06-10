@@ -23,6 +23,9 @@ class FakeAirtestApi:
     def text(self, value):
         self.calls.append(("text", value))
 
+    def keyevent(self, value):
+        self.calls.append(("keyevent", value))
+
     def swipe(self, start, end):
         self.calls.append(("swipe", start, end))
 
@@ -35,6 +38,26 @@ class FakeAirtestApi:
 
     def snapshot(self, filename=None):
         self.calls.append(("snapshot", filename))
+
+    def device(self):
+        self.calls.append(("device",))
+        return FakeDevice(self.calls)
+
+
+class FakeYosemiteIme:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def text(self, value):
+        self.calls.append(("yosemite_text", value))
+
+    def code(self, value):
+        self.calls.append(("yosemite_code", value))
+
+
+class FakeDevice:
+    def __init__(self, calls):
+        self.yosemite_ime = FakeYosemiteIme(calls)
 
 
 class FakePocoNode:
@@ -194,3 +217,30 @@ def test_airtest_driver_executes_swipe_direction(tmp_path, monkeypatch):
 
     assert result.status == "passed"
     assert ("swipe", (0.5, 0.35), (0.5, 0.75)) in fake_api.calls
+
+
+def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
+
+    assert result.status == "passed"
+    assert fake_api.calls == [
+        ("touch", (0.5, 0.12)),
+        ("touch", (0.5, 0.16)),
+        ("device",),
+        ("yosemite_text", "职悟空"),
+        ("yosemite_code", "3"),
+        ("touch", (0.5, 0.23)),
+    ]

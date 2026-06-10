@@ -32,7 +32,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["open_app", "open_miniapp", "open_page", "tap", "input", "swipe", "wait", "assert_text", "assert_element", "assert_data", "screenshot", "mock", "set_storage"]
+            "enum": ["open_app", "open_miniapp", "open_page", "search_miniapp", "tap", "input", "swipe", "wait", "assert_text", "assert_element", "assert_data", "screenshot", "mock", "set_storage"]
           },
           "target": { "type": "string", "minLength": 1 },
           "value": {},

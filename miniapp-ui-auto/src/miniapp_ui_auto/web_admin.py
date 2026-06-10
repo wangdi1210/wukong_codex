@@ -667,6 +667,10 @@ _INDEX_HTML = """<!doctype html>
     let allCases = [];
     let selectedIds = new Set();
     let editingCaseId = '';
+    const PAGE_STATE_KEY = 'miniapp-ui-auto.page-state.v1';
+    const DEVICE_STATE_KEY = 'miniapp-ui-auto.device-state.v1';
+    const pageState = loadPageState();
+    let restoredSelection = false;
 
     async function api(path, options) {
       const response = await fetch(path, options);
@@ -683,7 +687,35 @@ _INDEX_HTML = """<!doctype html>
     function switchTab(tab) {
       document.querySelectorAll('.nav button').forEach(item => item.classList.toggle('active', item.dataset.tab === tab));
       document.querySelectorAll('.tab-page').forEach(item => item.classList.toggle('active', item.id === tab));
+      pageState.tab = tab;
+      savePageState();
       if (tab === 'reports') loadReport().catch(error => toast(`加载报告失败：${error.message}`));
+      if (tab === 'devices') loadDeviceStatus().catch(error => toast(`加载设备状态失败：${error.message}`));
+    }
+    function loadPageState() {
+      try {
+        return JSON.parse(localStorage.getItem(PAGE_STATE_KEY) || '{}');
+      } catch (error) {
+        return {};
+      }
+    }
+    function savePageState() {
+      pageState.filters = {
+        module: document.getElementById('moduleFilter')?.value || '',
+        priority: document.getElementById('priorityFilter')?.value || '',
+        keyword: document.getElementById('searchInput')?.value || ''
+      };
+      pageState.selectedIds = [...selectedIds];
+      localStorage.setItem(PAGE_STATE_KEY, JSON.stringify(pageState));
+    }
+    function restorePageState() {
+      const filters = pageState.filters || {};
+      document.getElementById('priorityFilter').value = filters.priority || '';
+      document.getElementById('searchInput').value = filters.keyword || '';
+      if (Array.isArray(pageState.selectedIds)) {
+        selectedIds = new Set(pageState.selectedIds);
+        restoredSelection = true;
+      }
     }
     function toast(message) {
       const el = document.getElementById('toast');
@@ -785,7 +817,7 @@ _INDEX_HTML = """<!doctype html>
         allCases = data.cases;
         const validIds = new Set(allCases.map(item => item.id));
         selectedIds = new Set([...selectedIds].filter(id => validIds.has(id)));
-        if (selectedIds.size === 0) {
+        if (!restoredSelection && selectedIds.size === 0) {
           allCases.forEach(item => selectedIds.add(item.id));
         }
         fillModuleFilter();
@@ -797,10 +829,10 @@ _INDEX_HTML = """<!doctype html>
       }
     }
     function fillModuleFilter() {
-      const current = document.getElementById('moduleFilter').value;
+      const current = (pageState.filters && pageState.filters.module) || document.getElementById('moduleFilter').value;
       const modules = [...new Set(allCases.map(item => item.module))].sort();
       document.getElementById('moduleFilter').innerHTML = '<option value="">全部模块</option>' + modules.map(item => `<option value="${escapeAttr(item)}">${escapeHtml(item)}</option>`).join('');
-      document.getElementById('moduleFilter').value = current;
+      document.getElementById('moduleFilter').value = modules.includes(current) ? current : '';
     }
     function filteredCases() {
       const module = document.getElementById('moduleFilter').value;
@@ -826,6 +858,7 @@ _INDEX_HTML = """<!doctype html>
       }).join('');
       document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无用例</td></tr>';
       document.getElementById('headCheck').checked = filteredCases().length > 0 && filteredCases().every(item => selectedIds.has(item.id));
+      savePageState();
     }
     function renderMetrics() {
       document.getElementById('metricTotal').textContent = allCases.length;
@@ -834,6 +867,7 @@ _INDEX_HTML = """<!doctype html>
     }
     function toggleSelect(id, checked) {
       checked ? selectedIds.add(id) : selectedIds.delete(id);
+      savePageState();
     }
     function selectAllRows(checked) {
       filteredCases().forEach(item => checked ? selectedIds.add(item.id) : selectedIds.delete(item.id));
@@ -946,6 +980,7 @@ _INDEX_HTML = """<!doctype html>
       try {
         const data = await api('/api/devices/check');
         renderDevice(data);
+        localStorage.setItem(DEVICE_STATE_KEY, JSON.stringify(data));
         toast(data.ready ? '设备环境检查通过' : '设备环境仍需处理');
       } catch (error) {
         document.getElementById('deviceChecks').innerHTML = '<span class="check-item"><span class="dot fail"></span>检测失败</span>';
@@ -953,10 +988,29 @@ _INDEX_HTML = """<!doctype html>
         toast(`设备检测失败：${error.message}`);
       }
     }
+    async function loadDeviceStatus() {
+      try {
+        const data = await api('/api/devices/status');
+        if ((data.checks || []).length) {
+          renderDevice(data);
+          return;
+        }
+      } catch (error) {
+        // 如果后台刚重启或接口异常，仍优先展示浏览器里最近一次检测快照。
+      }
+      try {
+        const cached = JSON.parse(localStorage.getItem(DEVICE_STATE_KEY) || '{}');
+        if ((cached.checks || []).length) renderDevice(cached);
+      } catch (error) {
+        return;
+      }
+    }
     function renderDevice(data) {
       const checks = data.checks || [];
       document.getElementById('deviceChecks').innerHTML = checks.map(item => `<span class="check-item"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${escapeHtml(item.name)}</span>`).join('');
-      document.getElementById('checkDetail').innerHTML = checks.map(item => `<div class="check-card"><div class="check-title"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${escapeHtml(item.name)}</div><div class="check-message">${escapeHtml(item.message || '')}</div><div class="check-command">${escapeHtml(item.command || '')}</div></div>`).join('');
+      const cachedLabel = data.cached ? '（上次检测结果，未重新连接设备）' : '';
+      const checkedAt = data.checked_at ? `<div class="check-command">检测时间：${escapeHtml(data.checked_at)}${cachedLabel}</div>` : '';
+      document.getElementById('checkDetail').innerHTML = checkedAt + checks.map(item => `<div class="check-card"><div class="check-title"><span class="dot ${item.ok ? 'ok' : 'fail'}"></span>${escapeHtml(item.name)}</div><div class="check-message">${escapeHtml(item.message || '')}</div><div class="check-command">${escapeHtml(item.command || '')}</div></div>`).join('');
       const config = data.config || {};
       const configItems = [
         ['设备地址', config.device_uri || '未配置'],
@@ -971,6 +1025,8 @@ _INDEX_HTML = """<!doctype html>
       const rows = (data.devices || []).map(item => `<tr><td>${escapeHtml(item.serial)}</td><td>${escapeHtml(item.status)}</td></tr>`).join('');
       document.getElementById('deviceTable').innerHTML = rows ? `<table><thead><tr><th>设备序列号</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">暂无 ADB 设备</div>';
     }
+    restorePageState();
+    switchTab(pageState.tab || 'cases');
     loadCases();
     loadReport().catch(error => toast(`加载报告失败：${error.message}`));
   </script>

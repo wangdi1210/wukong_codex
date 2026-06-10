@@ -63,3 +63,18 @@ def test_generate_case_turns_swipe_language_into_swipe_step(tmp_path):
 
     assert case.steps[1].action == "swipe"
     assert case.steps[1].target == "down"
+
+
+def test_generate_case_turns_miniapp_search_into_search_step(tmp_path):
+    generated = generate_case_from_text(
+        "打开 微信\n搜索 职悟空 小程序\n点击 进入\n断言 进入职悟空小程序",
+        case_id="search_miniapp_case",
+        title="搜索进入小程序",
+        module="miniapp",
+    )
+    write_generated_case(generated, tmp_path / "search_miniapp_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.steps[1].action == "search_miniapp"
+    assert case.steps[1].target == "职悟空"
+    assert len(case.steps) == 2

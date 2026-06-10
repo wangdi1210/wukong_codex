@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -93,6 +94,8 @@ class AirtestDriver(AutomationDriver):
             return f"started app package {self.config.package}"
         if step.action == "open_miniapp":
             return self._open_miniapp(step.target)
+        if step.action == "search_miniapp":
+            return self._search_miniapp(step.target)
         if step.action == "tap":
             self._tap(step.target)
             return f"tapped {step.target}"
@@ -126,6 +129,39 @@ class AirtestDriver(AutomationDriver):
         raise NotImplementedError(
             "open_miniapp needs a project-specific entry strategy. Enable Poco or add image templates/search steps."
         )
+
+    def _search_miniapp(self, target: str) -> str:
+        miniapp_name = (target or self.config.miniapp_name).strip()
+        if not miniapp_name:
+            raise ValueError("search_miniapp requires a miniapp name.")
+        # 微信下拉页搜索入口在不同机型上没有稳定 Poco 文本，优先使用 Airtest 原生坐标和输入。
+        self._airtest_api.touch((0.5, 0.12))
+        time.sleep(0.3)
+        self._airtest_api.touch((0.5, 0.16))
+        time.sleep(0.5)
+        self._input_search_text(miniapp_name)
+        time.sleep(1)
+        self._airtest_api.touch((0.5, 0.23))
+        return f"searched miniapp {miniapp_name}"
+
+    def _input_search_text(self, value: str) -> None:
+        if _has_non_ascii(value):
+            try:
+                device = self._airtest_api.device()
+                ime = getattr(device, "yosemite_ime")
+                try:
+                    ime.text(value)
+                except Exception:
+                    ime.start()
+                    device.adb.shell(["am", "broadcast", "-a", "ADB_INPUT_TEXT", "--es", "msg", value])
+                ime.code("3")
+                return
+            except Exception as exc:  # noqa: BLE001 - provide an actionable device-side setup error.
+                raise RuntimeError(
+                    "中文输入需要 Airtest Yosemite 输入法。请保持手机亮屏并允许安装/启用 YosemiteIme，"
+                    f"然后在设备页重新检查环境后再执行。原始错误：{exc}"
+                ) from exc
+        self._airtest_api.text(value, enter=False, search=True)
 
     def _tap(self, target: str) -> None:
         image_path = self._image_path(target)
@@ -214,6 +250,10 @@ def load_airtest_config(config_path: Path) -> AirtestConfig:
         image_dir=airtest.get("image_dir", "assets/images") or "assets/images",
         poco_enabled=bool(poco.get("enabled", True)),
     )
+
+
+def _has_non_ascii(value: str) -> bool:
+    return any(ord(char) > 127 for char in value)
 
 
 def resolve_adb_device_uri() -> str:

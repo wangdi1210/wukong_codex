@@ -178,3 +178,27 @@ def test_web_admin_device_check_uses_adb_device_when_config_missing(tmp_path):
     assert result["config"]["resolved_device_uri"] == "Android:///94b63a3b"
     assert result["devices"] == [{"serial": "94b63a3b", "status": "device"}]
     assert result["ready"] is True
+
+
+def test_web_admin_device_status_returns_last_check_without_rechecking(tmp_path):
+    service = WebAdminService(case_root=tmp_path / "cases", schema_path=Path("schemas/case.schema.json"), report_dir=tmp_path / "reports")
+    adb_result = {
+        "name": "ADB",
+        "ok": True,
+        "message": "connected",
+        "devices": [{"serial": "stable-device", "status": "device"}],
+        "command": "adb devices",
+    }
+
+    with (
+        patch("miniapp_ui_auto.web_admin._check_adb_devices", return_value=adb_result) as adb_mock,
+        patch("miniapp_ui_auto.web_admin._check_airtest_connect", return_value={"name": "Airtest", "ok": True, "message": "ok"}),
+        patch("miniapp_ui_auto.web_admin._check_poco_connect", return_value={"name": "Poco", "ok": True, "message": "ok"}),
+    ):
+        checked = service.check_device_environment()
+        status = service.device_environment_status()
+
+    assert checked["devices"] == [{"serial": "stable-device", "status": "device"}]
+    assert status["cached"] is True
+    assert status["devices"] == [{"serial": "stable-device", "status": "device"}]
+    assert adb_mock.call_count == 1
