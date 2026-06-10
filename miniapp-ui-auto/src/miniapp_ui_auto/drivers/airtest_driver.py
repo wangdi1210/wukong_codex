@@ -164,6 +164,11 @@ class AirtestDriver(AutomationDriver):
         self._airtest_api.text(value, enter=False, search=True)
 
     def _tap(self, target: str) -> None:
+        target = _clean_action_target(target)
+        coordinate = _known_coordinate_target(target)
+        if coordinate is not None:
+            self._airtest_api.touch(coordinate)
+            return
         image_path = self._image_path(target)
         if image_path is not None:
             template = self._template_factory(str(image_path), threshold=self.config.image_threshold)
@@ -254,6 +259,17 @@ def load_airtest_config(config_path: Path) -> AirtestConfig:
 
 def _has_non_ascii(value: str) -> bool:
     return any(ord(char) > 127 for char in value)
+
+
+def _clean_action_target(value: str) -> str:
+    return value.strip(" ：:，,。\"'“”‘’")
+
+
+def _known_coordinate_target(value: str) -> tuple[float, float] | None:
+    known_targets = {
+        "开始交流": (0.5, 0.82),
+    }
+    return known_targets.get(value)
 
 
 def resolve_adb_device_uri() -> str:

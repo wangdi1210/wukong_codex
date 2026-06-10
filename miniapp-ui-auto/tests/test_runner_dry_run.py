@@ -19,10 +19,10 @@ def test_run_cases_with_dry_run_driver_writes_summary(tmp_path):
     summary_path = tmp_path / "summary.json"
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
-    assert result.total == 1
-    assert result.passed == 1
-    assert summary["total"] == 1
-    assert summary["passed"] == 1
+    assert result.total == len(cases)
+    assert result.passed == len(cases)
+    assert summary["total"] == len(cases)
+    assert summary["passed"] == len(cases)
     assert summary["cases"][0]["case_id"] == cases[0].id
     assert summary["cases"][0]["status"] == "passed"
-    assert "本次回归共执行 1 条" in summary["ai_summary"]
+    assert f"本次回归共执行 {len(cases)} 条" in summary["ai_summary"]

@@ -78,3 +78,17 @@ def test_generate_case_turns_miniapp_search_into_search_step(tmp_path):
     assert case.steps[1].action == "search_miniapp"
     assert case.steps[1].target == "职悟空"
     assert len(case.steps) == 2
+
+
+def test_generate_case_strips_quotes_from_tap_target(tmp_path):
+    generated = generate_case_from_text(
+        "点击 “开始交流”\n断言 进入悟空会话",
+        case_id="quoted_tap_case",
+        title="开始交流",
+        module="chat",
+    )
+    write_generated_case(generated, tmp_path / "quoted_tap_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.steps[0].action == "tap"
+    assert case.steps[0].target == "开始交流"

@@ -167,7 +167,7 @@ def _parse_input(line: str) -> tuple[str, str]:
 
 def _extract_target(line: str, prefixes: tuple[str, ...]) -> str:
     target = _strip_known_prefixes(line, prefixes)
-    return target.strip(" ：:，,。")
+    return _clean_target(target)
 
 
 def _strip_known_prefixes(line: str, prefixes: tuple[str, ...]) -> str:
@@ -175,3 +175,7 @@ def _strip_known_prefixes(line: str, prefixes: tuple[str, ...]) -> str:
         if line.startswith(prefix):
             return line[len(prefix) :].strip()
     return line.strip()
+
+
+def _clean_target(value: str) -> str:
+    return value.strip(" ：:，,。\"'“”‘’")

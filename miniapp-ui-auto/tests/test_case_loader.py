@@ -8,8 +8,8 @@ from miniapp_ui_auto.case_loader import CaseValidationError, load_cases
 def test_load_valid_case_from_directory():
     cases = load_cases(Path("cases"), Path("schemas/case.schema.json"))
 
-    assert len(cases) == 1
-    case = cases[0]
+    assert len(cases) >= 1
+    case = next(item for item in cases if item.id == "airtest_case_20260609180554")
     assert case.id
     assert case.platform == "miniapp"
     assert case.driver == "airtest"
