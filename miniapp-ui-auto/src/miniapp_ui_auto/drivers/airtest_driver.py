@@ -100,6 +100,9 @@ class AirtestDriver(AutomationDriver):
             self._tap(step.target)
             self._airtest_api.text("" if step.value is None else str(step.value))
             return f"input text into {step.target}"
+        if step.action == "swipe":
+            self._swipe(step.target)
+            return f"swiped {step.target}"
         if step.action == "wait":
             self._wait(step.target, timeout_ms=step.timeout_ms)
             return f"waited for {step.target}"
@@ -134,6 +137,19 @@ class AirtestDriver(AutomationDriver):
             self._poco(text=target).click()
             return
         self._airtest_api.touch(target)
+
+    def _swipe(self, direction: str) -> None:
+        direction = direction.lower().strip()
+        vectors = {
+            "down": ((0.5, 0.35), (0.5, 0.75)),
+            "up": ((0.5, 0.75), (0.5, 0.35)),
+            "left": ((0.75, 0.5), (0.25, 0.5)),
+            "right": ((0.25, 0.5), (0.75, 0.5)),
+        }
+        if direction not in vectors:
+            raise ValueError(f"Unsupported swipe direction: {direction}. Use down, up, left, or right.")
+        start, end = vectors[direction]
+        self._airtest_api.swipe(start, end)
 
     def _wait(self, target: str, timeout_ms: int | None) -> None:
         image_path = self._image_path(target)

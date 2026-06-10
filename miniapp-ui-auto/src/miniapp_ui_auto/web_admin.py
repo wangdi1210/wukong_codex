@@ -283,6 +283,9 @@ def _steps_to_natural_text(case: TestCase) -> str:
         elif step.action == "input":
             value = "" if step.value is None else str(step.value)
             lines.append(f"输入 {step.target}：{value}")
+        elif step.action == "swipe":
+            labels = {"down": "下拉", "up": "上滑", "left": "左滑", "right": "右滑"}
+            lines.append(labels.get(step.target, f"滑动 {step.target}"))
         elif step.action == "wait":
             lines.append(f"等待 {step.target}")
         elif step.action == "screenshot":

@@ -23,6 +23,9 @@ class FakeAirtestApi:
     def text(self, value):
         self.calls.append(("text", value))
 
+    def swipe(self, start, end):
+        self.calls.append(("swipe", start, end))
+
     def exists(self, target):
         self.calls.append(("exists", target))
         return True
@@ -172,3 +175,22 @@ def test_airtest_driver_uses_adb_device_when_config_uri_is_empty(tmp_path, monke
     driver.setup(RunContext(env="test", trigger="pytest"))
 
     assert ("connect_device", "Android:///94b63a3b") in fake_api.calls
+
+
+def test_airtest_driver_executes_swipe_direction(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="swipe", target="down"))
+
+    assert result.status == "passed"
+    assert ("swipe", (0.5, 0.35), (0.5, 0.75)) in fake_api.calls

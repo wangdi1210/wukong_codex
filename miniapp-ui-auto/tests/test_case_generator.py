@@ -49,3 +49,17 @@ def test_generate_case_keeps_preconditions(tmp_path):
     case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
 
     assert case.preconditions == ("用户已登录",)
+
+
+def test_generate_case_turns_swipe_language_into_swipe_step(tmp_path):
+    generated = generate_case_from_text(
+        "打开 微信\n在微信内持续做下拉操作\n断言 职悟空",
+        case_id="swipe_case",
+        title="下拉进入小程序",
+        module="miniapp",
+    )
+    write_generated_case(generated, tmp_path / "swipe_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.steps[1].action == "swipe"
+    assert case.steps[1].target == "down"

@@ -100,6 +100,9 @@ def _parse_assertion(line: str) -> dict[str, Any]:
 
 
 def _parse_step(line: str) -> dict[str, Any]:
+    swipe_direction = _parse_swipe_direction(line)
+    if swipe_direction:
+        return {"action": "swipe", "target": swipe_direction}
     if line.startswith(("打开", "进入", "访问")):
         target = _extract_target(line, ("打开", "进入", "访问"))
         if target in ("微信", "WeChat", "wechat"):
@@ -120,6 +123,18 @@ def _parse_step(line: str) -> dict[str, Any]:
     if "截图" in line:
         return {"action": "screenshot", "target": _extract_target(line, ("截图", "保存截图")) or "当前页面"}
     return {"action": "tap", "target": line}
+
+
+def _parse_swipe_direction(line: str) -> str:
+    if any(keyword in line for keyword in ("下拉", "向下滑", "往下滑", "下滑")):
+        return "down"
+    if any(keyword in line for keyword in ("上拉", "向上滑", "往上滑", "上滑", "滑到底部")):
+        return "up"
+    if any(keyword in line for keyword in ("左滑", "向左滑", "往左滑")):
+        return "left"
+    if any(keyword in line for keyword in ("右滑", "向右滑", "往右滑")):
+        return "right"
+    return ""
 
 
 def _parse_input(line: str) -> tuple[str, str]:
