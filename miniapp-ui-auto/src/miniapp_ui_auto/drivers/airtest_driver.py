@@ -91,6 +91,7 @@ class AirtestDriver(AutomationDriver):
     def _execute(self, step: Step) -> str:
         if step.action == "open_app":
             self._airtest_api.start_app(self.config.package)
+            time.sleep(1)
             return f"started app package {self.config.package}"
         if step.action == "open_miniapp":
             return self._open_miniapp(step.target)
@@ -105,6 +106,7 @@ class AirtestDriver(AutomationDriver):
             return f"input text into {step.target}"
         if step.action == "swipe":
             self._swipe(step.target)
+            time.sleep(1)
             return f"swiped {step.target}"
         if step.action == "wait":
             self._wait(step.target, timeout_ms=step.timeout_ms)
