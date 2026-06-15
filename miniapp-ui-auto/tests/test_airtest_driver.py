@@ -255,6 +255,28 @@ def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monk
     ]
 
 
+def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    fake_poco = FakePoco()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api, poco_factory=lambda: fake_poco)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
+
+    assert result.status == "passed"
+    assert ("poco_click", "职悟空") in fake_poco.calls
+    assert ("touch", (0.5, 0.23)) not in fake_api.calls
+
+
 def test_airtest_driver_taps_known_business_button_by_coordinate(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(

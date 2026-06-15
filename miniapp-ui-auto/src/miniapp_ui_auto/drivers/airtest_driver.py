@@ -143,8 +143,18 @@ class AirtestDriver(AutomationDriver):
         time.sleep(0.5)
         self._input_search_text(miniapp_name)
         time.sleep(1)
-        self._airtest_api.touch((0.5, 0.23))
+        self._tap_miniapp_search_result(miniapp_name)
+        time.sleep(1)
         return f"searched miniapp {miniapp_name}"
+
+    def _tap_miniapp_search_result(self, miniapp_name: str) -> None:
+        if self._poco is not None:
+            try:
+                self._poco(text=miniapp_name).click()
+                return
+            except Exception:
+                pass
+        self._airtest_api.touch((0.5, 0.23))
 
     def _input_search_text(self, value: str) -> None:
         self._input_text(value, editor_code="3")
