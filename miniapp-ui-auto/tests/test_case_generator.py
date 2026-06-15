@@ -108,6 +108,20 @@ def test_generate_case_turns_input_box_search_into_miniapp_search(tmp_path):
     assert case.steps[1].target == "职悟空"
 
 
+def test_generate_case_keeps_internal_search_miniapp_text_compatible(tmp_path):
+    generated = generate_case_from_text(
+        "打开 微信\nsearch_miniapp 职悟空\n断言 进入职悟空小程序",
+        case_id="internal_search_text_case",
+        title="搜索小程序",
+        module="miniapp",
+    )
+    write_generated_case(generated, tmp_path / "internal_search_text_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.steps[1].action == "search_miniapp"
+    assert case.steps[1].target == "职悟空"
+
+
 def test_generate_case_turns_send_text_into_input_step(tmp_path):
     generated = generate_case_from_text(
         "在输入框内发送：你好\n断言 触发模型回答",

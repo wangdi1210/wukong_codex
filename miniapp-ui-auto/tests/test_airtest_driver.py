@@ -8,8 +8,9 @@ from miniapp_ui_auto.models import RunContext, Step
 class FakeAirtestApi:
     Template = staticmethod(lambda filename, threshold=None: {"filename": filename, "threshold": threshold})
 
-    def __init__(self):
+    def __init__(self, ui_xml=""):
         self.calls = []
+        self.ui_xml = ui_xml
 
     def connect_device(self, device_uri):
         self.calls.append(("connect_device", device_uri))
@@ -41,7 +42,7 @@ class FakeAirtestApi:
 
     def device(self):
         self.calls.append(("device",))
-        return FakeDevice(self.calls)
+        return FakeDevice(self.calls, self.ui_xml)
 
 
 class FakeYosemiteIme:
@@ -56,8 +57,8 @@ class FakeYosemiteIme:
 
 
 class FakeDevice:
-    def __init__(self, calls):
-        self.adb = FakeAdb(calls)
+    def __init__(self, calls, ui_xml=""):
+        self.adb = FakeAdb(calls, ui_xml)
         self.yosemite_ime = FakeYosemiteIme(calls)
 
     def get_current_resolution(self):
@@ -65,11 +66,17 @@ class FakeDevice:
 
 
 class FakeAdb:
-    def __init__(self, calls):
+    def __init__(self, calls, ui_xml=""):
         self.calls = calls
+        self.ui_xml = ui_xml
 
     def shell(self, value):
         self.calls.append(("adb_shell", value))
+        if isinstance(value, list) and value[:1] == ["cat"]:
+            return self.ui_xml
+        if isinstance(value, list) and value[:2] == ["uiautomator", "dump"]:
+            return "UI hierarchy dumped"
+        return ""
 
 
 class FakePocoNode:
@@ -245,20 +252,86 @@ def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monk
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
+    result = driver.execute_step(Step(action="search_miniapp", target="测试小程序"))
+
+    assert result.status == "passed"
+    assert ("touch", (500, 140)) in fake_api.calls
+    assert ("touch", (500, 190)) in fake_api.calls
+    assert ("yosemite_text", "测试小程序") in fake_api.calls
+    assert ("touch", (500, 460)) in fake_api.calls
+
+
+def test_airtest_driver_focuses_search_box_by_uiautomator_bounds(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    ui_xml = (
+        '<hierarchy><node text="搜索小程序" content-desc="" '
+        'resource-id="" class="android.widget.EditText" bounds="[80,120][1120,210]" /></hierarchy>'
+    )
+    fake_api = FakeAirtestApi(ui_xml=ui_xml)
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="测试小程序"))
+
+    assert result.status == "passed"
+    assert ("touch", (600, 165)) in fake_api.calls
+    assert ("touch", (500, 140)) not in fake_api.calls
+
+
+def test_airtest_driver_opens_recent_miniapp_before_searching(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    ui_xml = (
+        '<hierarchy><node text="职悟空" content-desc="" '
+        'resource-id="" class="android.widget.TextView" bounds="[90,590][210,650]" /></hierarchy>'
+    )
+    fake_api = FakeAirtestApi(ui_xml=ui_xml)
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
     result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
 
     assert result.status == "passed"
-    assert fake_api.calls == [
-        ("device",),
-        ("touch", (500, 240)),
-        ("device",),
-        ("touch", (500, 320)),
-        ("device",),
-        ("yosemite_text", "职悟空"),
-        ("yosemite_code", "3"),
-        ("device",),
-        ("touch", (500, 460)),
-    ]
+    assert result.message == "opened recent miniapp 职悟空"
+    assert ("touch", (150, 620)) in fake_api.calls
+    assert ("yosemite_text", "职悟空") not in fake_api.calls
+
+
+def test_airtest_driver_opens_known_recent_miniapp_by_visual_coordinate(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
+
+    assert result.status == "passed"
+    assert result.message == "opened recent miniapp 职悟空"
+    assert ("touch", (160, 560)) in fake_api.calls
+    assert ("yosemite_text", "职悟空") not in fake_api.calls
 
 
 def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monkeypatch):

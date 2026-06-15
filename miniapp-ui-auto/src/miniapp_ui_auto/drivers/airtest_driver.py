@@ -3,9 +3,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+import xml.etree.ElementTree as ET
 
 import yaml
 
@@ -136,16 +138,71 @@ class AirtestDriver(AutomationDriver):
         miniapp_name = (target or self.config.miniapp_name).strip()
         if not miniapp_name:
             raise ValueError("search_miniapp requires a miniapp name.")
-        # 微信下拉页搜索入口在不同机型上没有稳定 Poco 文本，优先使用 Airtest 原生坐标和输入。
-        self._touch_ratio((0.5, 0.12))
-        time.sleep(0.3)
-        self._touch_ratio((0.5, 0.16))
+        if self._tap_recent_miniapp(miniapp_name):
+            time.sleep(1)
+            return f"opened recent miniapp {miniapp_name}"
+        # 最近列表找不到目标时，再进入搜索框输入小程序名称。
+        self._focus_miniapp_search_box()
         time.sleep(0.5)
         self._input_search_text(miniapp_name)
         time.sleep(1)
         self._tap_miniapp_search_result(miniapp_name)
         time.sleep(1)
         return f"searched miniapp {miniapp_name}"
+
+    def _tap_recent_miniapp(self, miniapp_name: str) -> bool:
+        if self._poco is not None:
+            try:
+                self._poco(text=miniapp_name).click()
+                return True
+            except Exception:
+                pass
+        if self._tap_by_uiautomator_exact_text(miniapp_name):
+            return True
+        coordinate = _known_recent_miniapp_coordinate(miniapp_name)
+        if coordinate is None:
+            return False
+        self._touch_ratio(coordinate)
+        return True
+
+    def _focus_miniapp_search_box(self) -> None:
+        if self._tap_by_uiautomator_text(("搜索小程序", "搜索", "搜一搜")):
+            return
+        # 微信下拉搜索页的输入框在顶部，不同机型状态栏高度略有差异，连续点两个顶部候选位置。
+        self._touch_ratio((0.5, 0.07))
+        time.sleep(0.3)
+        self._touch_ratio((0.5, 0.095))
+
+    def _tap_by_uiautomator_text(self, keywords: tuple[str, ...]) -> bool:
+        xml_text = self._dump_ui_xml()
+        point = _bounds_center_for_keywords(xml_text, keywords)
+        if point is None:
+            return False
+        self._airtest_api.touch(point)
+        return True
+
+    def _tap_by_uiautomator_exact_text(self, text: str) -> bool:
+        xml_text = self._dump_ui_xml()
+        point = _bounds_center_for_exact_text(xml_text, text)
+        if point is None:
+            return False
+        self._airtest_api.touch(point)
+        return True
+
+    def _dump_ui_xml(self) -> str:
+        try:
+            adb = self._airtest_api.device().adb
+            for path in ("/sdcard/window.xml", "/data/local/tmp/window.xml"):
+                adb.shell(["uiautomator", "dump", "--compressed", path])
+                xml_text = str(adb.shell(["cat", path]) or "")
+                if "<hierarchy" in xml_text:
+                    return xml_text
+            xml_text = str(adb.shell(["uiautomator", "dump", "--compressed", "/dev/tty"]) or "")
+            if "<hierarchy" in xml_text:
+                return xml_text
+        except Exception:
+            return ""
+        return ""
 
     def _tap_miniapp_search_result(self, miniapp_name: str) -> None:
         if self._poco is not None:
@@ -308,6 +365,67 @@ def _known_coordinate_target(value: str) -> tuple[float, float] | None:
         "输入框": (0.5, 0.9),
     }
     return known_targets.get(value)
+
+
+def _known_recent_miniapp_coordinate(value: str) -> tuple[float, float] | None:
+    known_targets = {
+        "职悟空": (0.16, 0.28),
+    }
+    return known_targets.get(value)
+
+
+def _bounds_center_for_keywords(xml_text: str, keywords: tuple[str, ...]) -> tuple[int, int] | None:
+    start = xml_text.find("<hierarchy")
+    if start < 0:
+        return None
+    try:
+        root = ET.fromstring(xml_text[start:])
+    except ET.ParseError:
+        return None
+    candidates: list[tuple[int, int, int]] = []
+    for node in root.iter("node"):
+        attrs = node.attrib
+        haystack = " ".join(
+            attrs.get(name, "") for name in ("text", "content-desc", "resource-id", "class")
+        )
+        if not any(keyword in haystack for keyword in keywords):
+            continue
+        center = _bounds_center(attrs.get("bounds", ""))
+        if center is not None:
+            x, y = center
+            candidates.append((y, x, len(attrs.get("text", "") or attrs.get("content-desc", ""))))
+    if not candidates:
+        return None
+    y, x, _ = sorted(candidates)[0]
+    return x, y
+
+
+def _bounds_center_for_exact_text(xml_text: str, text: str) -> tuple[int, int] | None:
+    start = xml_text.find("<hierarchy")
+    if start < 0:
+        return None
+    try:
+        root = ET.fromstring(xml_text[start:])
+    except ET.ParseError:
+        return None
+    for node in root.iter("node"):
+        attrs = node.attrib
+        if text not in (attrs.get("text", ""), attrs.get("content-desc", "")):
+            continue
+        center = _bounds_center(attrs.get("bounds", ""))
+        if center is not None:
+            return center
+    return None
+
+
+def _bounds_center(bounds: str) -> tuple[int, int] | None:
+    match = re.fullmatch(r"\[(\d+),(\d+)]\[(\d+),(\d+)]", bounds)
+    if not match:
+        return None
+    left, top, right, bottom = (int(item) for item in match.groups())
+    if right <= left or bottom <= top:
+        return None
+    return (left + right) // 2, (top + bottom) // 2
 
 
 def resolve_adb_device_uri() -> str:

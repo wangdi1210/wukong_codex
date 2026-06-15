@@ -303,6 +303,8 @@ def _steps_to_natural_text(case: TestCase) -> str:
             lines.append(f"打开 {step.target}")
         elif step.action == "open_miniapp":
             lines.append(f"进入 {step.target}小程序")
+        elif step.action == "search_miniapp":
+            lines.append(f"在输入框搜索：{step.target}")
         elif step.action == "tap":
             lines.append(f"点击 {step.target}")
         elif step.action == "input":

@@ -111,6 +111,28 @@ def test_web_admin_can_get_update_and_delete_case(tmp_path):
     assert service.list_cases() == []
 
 
+def test_web_admin_renders_search_miniapp_as_natural_step(tmp_path):
+    service = WebAdminService(
+        case_root=tmp_path / "cases",
+        schema_path=Path("schemas/case.schema.json"),
+        report_dir=tmp_path / "reports",
+    )
+    service.generate_case(
+        {
+            "case_id": "search_case",
+            "title": "搜索小程序",
+            "module": "miniapp",
+            "tags": ["smoke"],
+            "text": "打开 微信\n在输入框搜索：职悟空\n断言 进入职悟空小程序",
+        }
+    )
+
+    detail = service.get_case("search_case")
+
+    assert "在输入框搜索：职悟空" in detail["natural_steps"]
+    assert "search_miniapp" not in detail["natural_steps"]
+
+
 def test_web_admin_device_check_returns_config_and_checks(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()

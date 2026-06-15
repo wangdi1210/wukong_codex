@@ -148,6 +148,8 @@ def _parse_swipe_direction(line: str) -> str:
 
 
 def _parse_miniapp_search(line: str) -> str:
+    if line.startswith("search_miniapp"):
+        return _clean_target(line.removeprefix("search_miniapp"))
     if "输入框" in line and any(keyword in line for keyword in ("搜索", "搜")):
         target = _value_after_colon(line)
         if target:
