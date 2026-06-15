@@ -137,9 +137,9 @@ class AirtestDriver(AutomationDriver):
         if not miniapp_name:
             raise ValueError("search_miniapp requires a miniapp name.")
         # 微信下拉页搜索入口在不同机型上没有稳定 Poco 文本，优先使用 Airtest 原生坐标和输入。
-        self._airtest_api.touch((0.5, 0.12))
+        self._touch_ratio((0.5, 0.12))
         time.sleep(0.3)
-        self._airtest_api.touch((0.5, 0.16))
+        self._touch_ratio((0.5, 0.16))
         time.sleep(0.5)
         self._input_search_text(miniapp_name)
         time.sleep(1)
@@ -154,7 +154,7 @@ class AirtestDriver(AutomationDriver):
                 return
             except Exception:
                 pass
-        self._airtest_api.touch((0.5, 0.23))
+        self._touch_ratio((0.5, 0.23))
 
     def _input_search_text(self, value: str) -> None:
         self._input_text(value, editor_code="3")
@@ -185,7 +185,7 @@ class AirtestDriver(AutomationDriver):
         target = _clean_action_target(target)
         coordinate = _known_coordinate_target(target)
         if coordinate is not None:
-            self._airtest_api.touch(coordinate)
+            self._touch_ratio(coordinate)
             return
         image_path = self._image_path(target)
         if image_path is not None:
@@ -208,7 +208,26 @@ class AirtestDriver(AutomationDriver):
         if direction not in vectors:
             raise ValueError(f"Unsupported swipe direction: {direction}. Use down, up, left, or right.")
         start, end = vectors[direction]
-        self._airtest_api.swipe(start, end)
+        self._airtest_api.swipe(self._point(start), self._point(end))
+
+    def _touch_ratio(self, point: tuple[float, float]) -> None:
+        self._airtest_api.touch(self._point(point))
+
+    def _point(self, point: tuple[float, float]) -> tuple[int, int]:
+        x, y = point
+        if x > 1 or y > 1:
+            return int(x), int(y)
+        width, height = self._screen_size()
+        return int(width * x), int(height * y)
+
+    def _screen_size(self) -> tuple[int, int]:
+        try:
+            size = self._airtest_api.device().get_current_resolution()
+        except Exception:
+            return 1080, 1920
+        if not size or len(size) < 2:
+            return 1080, 1920
+        return int(size[0]), int(size[1])
 
     def _wait(self, target: str, timeout_ms: int | None) -> None:
         image_path = self._image_path(target)

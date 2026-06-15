@@ -60,6 +60,9 @@ class FakeDevice:
         self.adb = FakeAdb(calls)
         self.yosemite_ime = FakeYosemiteIme(calls)
 
+    def get_current_resolution(self):
+        return (1000, 2000)
+
 
 class FakeAdb:
     def __init__(self, calls):
@@ -225,7 +228,7 @@ def test_airtest_driver_executes_swipe_direction(tmp_path, monkeypatch):
     result = driver.execute_step(Step(action="swipe", target="down"))
 
     assert result.status == "passed"
-    assert ("swipe", (0.5, 0.35), (0.5, 0.75)) in fake_api.calls
+    assert ("swipe", (500, 700), (500, 1500)) in fake_api.calls
 
 
 def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monkeypatch):
@@ -246,12 +249,15 @@ def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monk
 
     assert result.status == "passed"
     assert fake_api.calls == [
-        ("touch", (0.5, 0.12)),
-        ("touch", (0.5, 0.16)),
+        ("device",),
+        ("touch", (500, 240)),
+        ("device",),
+        ("touch", (500, 320)),
         ("device",),
         ("yosemite_text", "职悟空"),
         ("yosemite_code", "3"),
-        ("touch", (0.5, 0.23)),
+        ("device",),
+        ("touch", (500, 460)),
     ]
 
 
@@ -274,7 +280,7 @@ def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monk
 
     assert result.status == "passed"
     assert ("poco_click", "职悟空") in fake_poco.calls
-    assert ("touch", (0.5, 0.23)) not in fake_api.calls
+    assert ("touch", (500, 460)) not in fake_api.calls
 
 
 def test_airtest_driver_taps_known_business_button_by_coordinate(tmp_path, monkeypatch):
@@ -294,7 +300,7 @@ def test_airtest_driver_taps_known_business_button_by_coordinate(tmp_path, monke
     result = driver.execute_step(Step(action="tap", target="“开始交流”"))
 
     assert result.status == "passed"
-    assert ("touch", (0.5, 0.82)) in fake_api.calls
+    assert ("touch", (500, 1640)) in fake_api.calls
     assert fake_poco.calls == []
 
 
@@ -315,7 +321,7 @@ def test_airtest_driver_inputs_chinese_text_by_coordinate_and_yosemite(tmp_path,
     result = driver.execute_step(Step(action="input", target="输入框", value="你好"))
 
     assert result.status == "passed"
-    assert ("touch", (0.5, 0.9)) in fake_api.calls
+    assert ("touch", (500, 1800)) in fake_api.calls
     assert ("yosemite_text", "你好") in fake_api.calls
     assert ("adb_shell", ["input", "keyevent", "ENTER"]) in fake_api.calls
     assert fake_poco.calls == []
