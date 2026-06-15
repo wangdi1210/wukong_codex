@@ -92,3 +92,32 @@ def test_generate_case_strips_quotes_from_tap_target(tmp_path):
 
     assert case.steps[0].action == "tap"
     assert case.steps[0].target == "开始交流"
+
+
+def test_generate_case_turns_input_box_search_into_miniapp_search(tmp_path):
+    generated = generate_case_from_text(
+        "打开 微信\n在输入框搜索：职悟空\n从列表中找到 职悟空小程序，点击进入\n断言 进入职悟空小程序",
+        case_id="input_box_search_case",
+        title="搜索小程序",
+        module="miniapp",
+    )
+    write_generated_case(generated, tmp_path / "input_box_search_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert [step.action for step in case.steps] == ["open_app", "search_miniapp"]
+    assert case.steps[1].target == "职悟空"
+
+
+def test_generate_case_turns_send_text_into_input_step(tmp_path):
+    generated = generate_case_from_text(
+        "在输入框内发送：你好\n断言 触发模型回答",
+        case_id="send_message_case",
+        title="发送消息",
+        module="chat",
+    )
+    write_generated_case(generated, tmp_path / "send_message_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.steps[0].action == "input"
+    assert case.steps[0].target == "输入框"
+    assert case.steps[0].value == "你好"

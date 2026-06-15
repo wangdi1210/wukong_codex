@@ -1,0 +1,20 @@
+id: airtest_case_20260615214104
+title: 进入小程序
+platform: miniapp
+driver: airtest
+module: 默认模块
+priority: P1
+tags:
+- smoke
+owner: qa
+version: 1
+preconditions: []
+steps:
+- action: swipe
+  target: left
+- action: tap
+  target: 开始交流
+assertions:
+- type: text
+  target: 进入会话详情
+  expected: visible

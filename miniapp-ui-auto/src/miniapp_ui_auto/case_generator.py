@@ -118,6 +118,10 @@ def _parse_step(line: str) -> dict[str, Any]:
         return {"action": "open_page", "target": target}
     if line.startswith(("点击", "点", "选择")):
         return {"action": "tap", "target": _extract_target(line, ("点击", "点", "选择"))}
+    inline_input = _parse_inline_input(line)
+    if inline_input:
+        target, value = inline_input
+        return {"action": "input", "target": target, "value": value}
     if line.startswith(("输入", "填写", "填入")):
         target, value = _parse_input(line)
         step: dict[str, Any] = {"action": "input", "target": target}
@@ -144,17 +148,35 @@ def _parse_swipe_direction(line: str) -> str:
 
 
 def _parse_miniapp_search(line: str) -> str:
-    if "小程序" not in line or not any(keyword in line for keyword in ("搜索", "查找", "搜")):
+    if "输入框" in line and any(keyword in line for keyword in ("搜索", "搜")):
+        target = _value_after_colon(line)
+        if target:
+            return _clean_target(target)
+    if "小程序" not in line or not any(keyword in line for keyword in ("搜索", "查找", "搜", "找到")):
         return ""
     target = _strip_known_prefixes(line, ("搜索", "查找", "搜一下", "搜"))
-    target = target.replace("小程序", "").replace("并进入", "").replace("进入", "").strip(" ：:，,。")
-    return target
+    target = target.replace("从列表中找到", "").replace("小程序", "").replace("并进入", "").replace("点击进入", "").replace("进入", "")
+    return _clean_target(target)
 
 
 def _is_redundant_miniapp_entry_step(step: dict[str, Any], steps: list[dict[str, Any]]) -> bool:
     if not steps or steps[-1].get("action") != "search_miniapp":
         return False
-    return step.get("action") == "tap" and step.get("target") in ("进入", "进入小程序", "打开", "打开小程序")
+    if step.get("action") == "search_miniapp":
+        return True
+    if step.get("action") != "tap":
+        return False
+    target = str(step.get("target") or "")
+    return target in ("进入", "进入小程序", "打开", "打开小程序") or ("小程序" in target and "进入" in target)
+
+
+def _parse_inline_input(line: str) -> tuple[str, str] | None:
+    if "输入框" not in line or not any(keyword in line for keyword in ("发送", "输入", "填写", "填入")):
+        return None
+    value = _value_after_colon(line)
+    if not value:
+        return None
+    return "输入框", _clean_target(value)
 
 
 def _parse_input(line: str) -> tuple[str, str]:
@@ -163,6 +185,13 @@ def _parse_input(line: str) -> tuple[str, str]:
     if match:
         return match.group(1).strip(), match.group(2).strip().strip("\"'")
     return content, ""
+
+
+def _value_after_colon(line: str) -> str:
+    parts = re.split(r"[:：]", line, maxsplit=1)
+    if len(parts) != 2:
+        return ""
+    return parts[1].strip()
 
 
 def _extract_target(line: str, prefixes: tuple[str, ...]) -> str:

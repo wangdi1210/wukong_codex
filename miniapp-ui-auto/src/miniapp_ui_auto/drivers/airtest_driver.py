@@ -101,7 +101,7 @@ class AirtestDriver(AutomationDriver):
             return f"tapped {step.target}"
         if step.action == "input":
             self._tap(step.target)
-            self._airtest_api.text("" if step.value is None else str(step.value))
+            self._input_text("" if step.value is None else str(step.value), submit=True)
             return f"input text into {step.target}"
         if step.action == "swipe":
             self._swipe(step.target)
@@ -145,6 +145,9 @@ class AirtestDriver(AutomationDriver):
         return f"searched miniapp {miniapp_name}"
 
     def _input_search_text(self, value: str) -> None:
+        self._input_text(value, editor_code="3")
+
+    def _input_text(self, value: str, *, submit: bool = False, editor_code: str | None = None) -> None:
         if _has_non_ascii(value):
             try:
                 device = self._airtest_api.device()
@@ -154,14 +157,17 @@ class AirtestDriver(AutomationDriver):
                 except Exception:
                     ime.start()
                     device.adb.shell(["am", "broadcast", "-a", "ADB_INPUT_TEXT", "--es", "msg", value])
-                ime.code("3")
+                if editor_code is not None:
+                    ime.code(editor_code)
+                elif submit:
+                    device.adb.shell(["input", "keyevent", "ENTER"])
                 return
             except Exception as exc:  # noqa: BLE001 - provide an actionable device-side setup error.
                 raise RuntimeError(
                     "中文输入需要 Airtest Yosemite 输入法。请保持手机亮屏并允许安装/启用 YosemiteIme，"
                     f"然后在设备页重新检查环境后再执行。原始错误：{exc}"
                 ) from exc
-        self._airtest_api.text(value, enter=False, search=True)
+        self._airtest_api.text(value, enter=submit, search=editor_code == "3")
 
     def _tap(self, target: str) -> None:
         target = _clean_action_target(target)
@@ -268,6 +274,7 @@ def _clean_action_target(value: str) -> str:
 def _known_coordinate_target(value: str) -> tuple[float, float] | None:
     known_targets = {
         "开始交流": (0.5, 0.82),
+        "输入框": (0.5, 0.9),
     }
     return known_targets.get(value)
 

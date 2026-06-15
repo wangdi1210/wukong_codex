@@ -1,0 +1,20 @@
+id: airtest_case_20260615214151
+title: 发送用户第一句话
+platform: miniapp
+driver: airtest
+module: 默认模块
+priority: P1
+tags:
+- smoke
+owner: qa
+version: 1
+preconditions:
+- 进入会话详情
+steps:
+- action: input
+  target: 输入框
+  value: 你好
+assertions:
+- type: text
+  target: 触发模型回答
+  expected: visible

@@ -20,8 +20,8 @@ class FakeAirtestApi:
     def touch(self, target):
         self.calls.append(("touch", target))
 
-    def text(self, value):
-        self.calls.append(("text", value))
+    def text(self, value, **kwargs):
+        self.calls.append(("text", value, kwargs))
 
     def keyevent(self, value):
         self.calls.append(("keyevent", value))
@@ -57,7 +57,16 @@ class FakeYosemiteIme:
 
 class FakeDevice:
     def __init__(self, calls):
+        self.adb = FakeAdb(calls)
         self.yosemite_ime = FakeYosemiteIme(calls)
+
+
+class FakeAdb:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def shell(self, value):
+        self.calls.append(("adb_shell", value))
 
 
 class FakePocoNode:
@@ -155,7 +164,7 @@ def test_airtest_driver_executes_steps_with_fake_api_and_poco(tmp_path):
     assert ("poco_click", "职悟空") in fake_poco.calls
     assert ("poco_click", "我的") in fake_poco.calls
     assert ("poco_click", "手机号输入框") in fake_poco.calls
-    assert ("text", "13800000000") in fake_api.calls
+    assert ("text", "13800000000", {"enter": True, "search": False}) in fake_api.calls
     assert ("poco_exists", "用户昵称") in fake_poco.calls
 
 
@@ -264,4 +273,27 @@ def test_airtest_driver_taps_known_business_button_by_coordinate(tmp_path, monke
 
     assert result.status == "passed"
     assert ("touch", (0.5, 0.82)) in fake_api.calls
+    assert fake_poco.calls == []
+
+
+def test_airtest_driver_inputs_chinese_text_by_coordinate_and_yosemite(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    fake_poco = FakePoco()
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api, poco_factory=lambda: fake_poco)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="input", target="输入框", value="你好"))
+
+    assert result.status == "passed"
+    assert ("touch", (0.5, 0.9)) in fake_api.calls
+    assert ("yosemite_text", "你好") in fake_api.calls
+    assert ("adb_shell", ["input", "keyevent", "ENTER"]) in fake_api.calls
     assert fake_poco.calls == []
