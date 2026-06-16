@@ -500,6 +500,16 @@ _INDEX_HTML = """<!doctype html>
     th { color: #333; font-weight: 600; }
     tbody tr:hover { background: #fafcff; }
     .checkbox { width: 16px; height: 16px; accent-color: #1677ff; }
+    .dependency-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #e8edf3; border-radius: 8px; background: #f8fbff; }
+    .dependency-copy strong { display: block; color: #1f2329; font-size: 14px; margin-bottom: 4px; }
+    .dependency-copy span { display: block; color: #858b99; font-size: 12px; line-height: 18px; }
+    .switch { position: relative; display: inline-flex; width: 44px; height: 24px; flex: 0 0 44px; }
+    .switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .switch-track { position: absolute; inset: 0; border-radius: 999px; background: #c7ced9; transition: background .2s ease; }
+    .switch-track::after { content: ""; position: absolute; width: 20px; height: 20px; left: 2px; top: 2px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .25); transition: transform .2s ease; }
+    .switch input:checked + .switch-track { background: #1677ff; }
+    .switch input:checked + .switch-track::after { transform: translateX(20px); }
+    .switch input:focus-visible + .switch-track { outline: 2px solid rgba(22, 119, 255, .35); outline-offset: 2px; }
     .tag { display: inline-block; border-radius: 2px; padding: 3px 8px; font-size: 12px; line-height: 18px; }
     .tag-p0 { color: #cf1322; background: #fff1f0; }
     .tag-p1 { color: #f5222d; background: #fff1f0; }
@@ -660,7 +670,16 @@ _INDEX_HTML = """<!doctype html>
         <div class="field"><label>用例标题 *</label><input id="formTitle" placeholder="请输入用例标题"></div>
         <div class="field"><label>所属模块</label><input id="formModule" placeholder="例如：登录、首页、个人中心"></div>
         <div class="field"><label>优先级</label><select id="formPriority"><option value="P2">P2 - 中</option><option value="P0">P0 - 阻塞</option><option value="P1">P1 - 高</option><option value="P3">P3 - 低</option></select></div>
-        <div class="field"><label><input class="checkbox" type="checkbox" id="formDependsPrevious"> 依赖上一条用例状态</label></div>
+        <div class="field dependency-option">
+          <div class="dependency-copy">
+            <strong>运行方式</strong>
+            <span>默认独立运行；需要沿用上一条用例状态时再开启依赖。</span>
+          </div>
+          <label class="switch" title="依赖上一条用例状态">
+            <input type="checkbox" id="formDependsPrevious" aria-label="依赖上一条用例状态">
+            <span class="switch-track"></span>
+          </label>
+        </div>
         <div class="field"><label>前置条件</label><textarea id="formPreconditions" placeholder="执行此用例前需要满足的条件"></textarea></div>
         <div class="field"><label>测试步骤 *</label><textarea id="formSteps" placeholder="1. 打开微信&#10;2. 进入职悟空小程序&#10;3. 点击我的&#10;4. 输入手机号"></textarea></div>
         <div class="field"><label>预期结果 *</label><textarea id="formExpected" placeholder="描述期望看到的结果"></textarea></div>

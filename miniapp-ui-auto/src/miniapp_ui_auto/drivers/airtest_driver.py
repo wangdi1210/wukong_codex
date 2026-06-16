@@ -101,12 +101,12 @@ class AirtestDriver(AutomationDriver):
         if step.action == "search_miniapp":
             return self._search_miniapp(step.target)
         if step.action == "tap":
-            self._tap(step.target)
-            return f"tapped {step.target}"
+            source = self._tap(step.target)
+            return f"tapped {step.target}; source={source}"
         if step.action == "input":
-            self._tap(step.target)
+            source = self._tap(step.target)
             self._input_text("" if step.value is None else str(step.value), submit=True)
-            return f"input text into {step.target}"
+            return f"input text into {step.target}; focus_source={source}"
         if step.action == "swipe":
             self._swipe(step.target)
             time.sleep(1)
@@ -400,21 +400,37 @@ class AirtestDriver(AutomationDriver):
                 ) from exc
         self._airtest_api.text(value, enter=submit, search=editor_code == "3")
 
-    def _tap(self, target: str) -> None:
+    def _tap(self, target: str) -> str:
         target = _clean_action_target(target)
-        coordinate = _known_coordinate_target(target)
-        if coordinate is not None:
-            self._touch_ratio(coordinate)
-            return
         image_path = self._image_path(target)
         if image_path is not None:
             template = self._template_factory(str(image_path), threshold=self.config.image_threshold)
             self._airtest_api.touch(template)
-            return
+            return "image_template"
         if self._poco is not None:
-            self._poco(text=target).click()
-            return
+            try:
+                self._poco(text=target).click()
+                return "poco_text"
+            except Exception:
+                pass
+        if self._tap_by_uiautomator_exact_text(target):
+            return "uiautomator_text"
+        if _looks_like_input_target(target) and self._tap_first_editable_field():
+            return "uiautomator_editable"
+        coordinate = _known_coordinate_target(target)
+        if coordinate is not None:
+            self._touch_ratio(coordinate)
+            return "coordinate_fallback"
         self._airtest_api.touch(target)
+        return "airtest_raw_target"
+
+    def _tap_first_editable_field(self) -> bool:
+        xml_text = self._dump_ui_xml()
+        point = _bounds_center_for_editable(xml_text)
+        if point is None:
+            return False
+        self._airtest_api.touch(point)
+        return True
 
     def _swipe(self, direction: str) -> None:
         direction = direction.lower().strip()
@@ -537,6 +553,10 @@ def _known_recent_miniapp_coordinate(value: str) -> tuple[float, float] | None:
         "职悟空": (0.16, 0.28),
     }
     return known_targets.get(value)
+
+
+def _looks_like_input_target(value: str) -> bool:
+    return any(keyword in value for keyword in ("输入框", "输入栏", "文本框", "编辑框", "input", "textarea"))
 
 
 def _find_search_box_center(image_path: Path, *, require_dark_panel: bool = False) -> tuple[int, int] | None:
@@ -723,14 +743,57 @@ def _bounds_center_for_exact_text(xml_text: str, text: str) -> tuple[int, int] |
     return None
 
 
+def _bounds_center_for_editable(xml_text: str) -> tuple[int, int] | None:
+    start = xml_text.find("<hierarchy")
+    if start < 0:
+        return None
+    try:
+        root = ET.fromstring(xml_text[start:])
+    except ET.ParseError:
+        return None
+    candidates: list[tuple[int, int, int, int, int]] = []
+    for node in root.iter("node"):
+        attrs = node.attrib
+        class_name = attrs.get("class", "")
+        resource_id = attrs.get("resource-id", "")
+        clickable = attrs.get("clickable", "")
+        enabled = attrs.get("enabled", "")
+        focusable = attrs.get("focusable", "")
+        editable = (
+            "EditText" in class_name
+            or "input" in resource_id.lower()
+            or "editor" in resource_id.lower()
+            or (clickable == "true" and focusable == "true" and enabled != "false")
+        )
+        if not editable:
+            continue
+        rect = _bounds_rect(attrs.get("bounds", ""))
+        if rect is None:
+            continue
+        left, top, right, bottom = rect
+        candidates.append((top, left, right, bottom, len(attrs.get("text", "") or attrs.get("content-desc", ""))))
+    if not candidates:
+        return None
+    top, left, right, bottom, _ = sorted(candidates, key=lambda item: (-item[0], item[1]))[0]
+    return (left + right) // 2, (top + bottom) // 2
+
+
 def _bounds_center(bounds: str) -> tuple[int, int] | None:
+    rect = _bounds_rect(bounds)
+    if rect is None:
+        return None
+    left, top, right, bottom = rect
+    return (left + right) // 2, (top + bottom) // 2
+
+
+def _bounds_rect(bounds: str) -> tuple[int, int, int, int] | None:
     match = re.fullmatch(r"\[(\d+),(\d+)]\[(\d+),(\d+)]", bounds)
     if not match:
         return None
     left, top, right, bottom = (int(item) for item in match.groups())
     if right <= left or bottom <= top:
         return None
-    return (left + right) // 2, (top + bottom) // 2
+    return left, top, right, bottom
 
 
 def resolve_adb_device_uri() -> str:

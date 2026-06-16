@@ -267,7 +267,7 @@ def test_airtest_driver_focuses_search_box_by_uiautomator_bounds(tmp_path, monke
     config_path.write_text(
         "airtest:\n"
         "  poco:\n"
-        "    enabled: false\n",
+        "    enabled: true\n",
         encoding="utf-8",
     )
     ui_xml = (
@@ -421,45 +421,48 @@ def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monk
     assert ("touch", (500, 460)) not in fake_api.calls
 
 
-def test_airtest_driver_taps_known_business_button_by_coordinate(tmp_path, monkeypatch):
+def test_airtest_driver_uses_coordinate_only_as_tap_fallback(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(
         "airtest:\n"
         "  poco:\n"
-        "    enabled: true\n",
+        "    enabled: false\n",
         encoding="utf-8",
     )
     fake_api = FakeAirtestApi()
-    fake_poco = FakePoco()
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
-    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api, poco_factory=lambda: fake_poco)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
     result = driver.execute_step(Step(action="tap", target="“开始交流”"))
 
     assert result.status == "passed"
+    assert "source=coordinate_fallback" in result.message
     assert ("touch", (500, 1640)) in fake_api.calls
-    assert fake_poco.calls == []
 
 
-def test_airtest_driver_inputs_chinese_text_by_coordinate_and_yosemite(tmp_path, monkeypatch):
+def test_airtest_driver_inputs_chinese_text_by_editable_field_and_yosemite(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(
         "airtest:\n"
         "  poco:\n"
-        "    enabled: true\n",
+        "    enabled: false\n",
         encoding="utf-8",
     )
-    fake_api = FakeAirtestApi()
-    fake_poco = FakePoco()
+    ui_xml = (
+        '<hierarchy><node text="" content-desc="" resource-id="chat_input" '
+        'class="android.widget.EditText" clickable="true" focusable="true" '
+        'enabled="true" bounds="[80,1660][920,1760]" /></hierarchy>'
+    )
+    fake_api = FakeAirtestApi(ui_xml=ui_xml)
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
-    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api, poco_factory=lambda: fake_poco)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
     result = driver.execute_step(Step(action="input", target="输入框", value="你好"))
 
     assert result.status == "passed"
-    assert ("touch", (500, 1800)) in fake_api.calls
+    assert "focus_source=uiautomator_editable" in result.message
+    assert ("touch", (500, 1710)) in fake_api.calls
     assert ("yosemite_text", "你好") in fake_api.calls
     assert ("adb_shell", ["input", "keyevent", "ENTER"]) in fake_api.calls
-    assert fake_poco.calls == []

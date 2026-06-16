@@ -63,3 +63,22 @@ def test_run_cases_marks_case_failed_when_assertion_fails(tmp_path):
     assert summary["cases"][0]["status"] == "failed"
     assert summary["cases"][0]["steps"][-1]["action"] == "assert_text"
     assert summary["cases"][0]["steps"][-1]["message"] == "assertion failed"
+
+
+def test_run_cases_skips_dependent_case_when_previous_case_fails(tmp_path):
+    cases = load_cases(Path("cases"), Path("schemas/case.schema.json"))[:2]
+
+    result = run_cases(
+        cases=cases,
+        driver=FailingAssertionDriver(),
+        context=RunContext(env="test", trigger="pytest"),
+        report_dir=tmp_path,
+    )
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+
+    assert result.failed == 1
+    assert result.skipped == 1
+    assert summary["cases"][0]["status"] == "failed"
+    assert summary["cases"][1]["status"] == "skipped"
+    assert summary["cases"][1]["steps"][0]["action"] == "dependency"
+    assert cases[1].depends_on_previous is True

@@ -17,11 +17,39 @@ def run_cases(
     case_results: list[CaseResult] = []
     driver.setup(context)
     try:
+        previous_result: CaseResult | None = None
         for case in cases:
-            case_results.append(_run_case(case, driver))
+            if case.depends_on_previous and previous_result is not None and previous_result.status != "passed":
+                result = _skip_dependent_case(case, previous_result)
+            else:
+                result = _run_case(case, driver)
+            case_results.append(result)
+            previous_result = result
     finally:
         driver.teardown()
     return write_summary(report_dir, context, case_results)
+
+
+def _skip_dependent_case(case: TestCase, previous_result: CaseResult) -> CaseResult:
+    return CaseResult(
+        case_id=case.id,
+        title=case.title,
+        module=case.module,
+        priority=case.priority,
+        tags=case.tags,
+        depends_on_previous=case.depends_on_previous,
+        status="skipped",
+        steps=(
+            StepResult(
+                action="dependency",
+                target=previous_result.case_id,
+                status="skipped",
+                message=f"上一条用例 {previous_result.case_id} 状态为 {previous_result.status}，当前用例配置为依赖上一条，已跳过执行。",
+            ),
+        ),
+        failure_category="依赖跳过",
+        failure_summary="上一条用例未通过，当前依赖用例未执行。",
+    )
 
 
 def _run_case(case: TestCase, driver: AutomationDriver) -> CaseResult:
