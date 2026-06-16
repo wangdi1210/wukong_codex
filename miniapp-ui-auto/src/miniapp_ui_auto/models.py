@@ -33,6 +33,7 @@ class TestCase:
     owner: str
     version: int
     preconditions: tuple[str, ...]
+    depends_on_previous: bool
     steps: tuple[Step, ...]
     assertions: tuple[Assertion, ...]
     source_path: str
@@ -62,6 +63,7 @@ class CaseResult:
     module: str
     priority: str
     tags: tuple[str, ...]
+    depends_on_previous: bool
     status: str
     steps: tuple[StepResult, ...]
     failure_category: str = ""

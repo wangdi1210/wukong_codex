@@ -49,6 +49,21 @@ def test_generate_case_keeps_preconditions(tmp_path):
     case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
 
     assert case.preconditions == ("用户已登录",)
+    assert case.depends_on_previous is False
+
+
+def test_generate_case_can_depend_on_previous_case(tmp_path):
+    generated = generate_case_from_text(
+        "点击 开始交流\n断言 进入会话详情",
+        case_id="dependent_case",
+        title="进入会话",
+        module="chat",
+        depends_on_previous=True,
+    )
+    write_generated_case(generated, tmp_path / "dependent_case.yaml")
+    case = load_cases(tmp_path, Path("schemas/case.schema.json"))[0]
+
+    assert case.depends_on_previous is True
 
 
 def test_generate_case_turns_swipe_language_into_swipe_step(tmp_path):

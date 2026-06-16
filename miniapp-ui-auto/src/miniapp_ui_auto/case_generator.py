@@ -24,6 +24,7 @@ def generate_case_from_text(
     tags: tuple[str, ...] = ("smoke",),
     owner: str = "qa",
     driver: str = "airtest",
+    depends_on_previous: bool = False,
 ) -> GeneratedCase:
     lines = _clean_lines(text)
     preconditions: list[str] = []
@@ -57,6 +58,7 @@ def generate_case_from_text(
         "owner": owner,
         "version": 1,
         "preconditions": preconditions,
+        "depends_on_previous": depends_on_previous,
         "steps": steps,
         "assertions": assertions,
     }

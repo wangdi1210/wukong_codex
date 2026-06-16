@@ -9,6 +9,7 @@ tags:
 owner: qa
 version: 1
 preconditions: []
+depends_on_previous: true
 steps:
 - action: swipe
   target: left

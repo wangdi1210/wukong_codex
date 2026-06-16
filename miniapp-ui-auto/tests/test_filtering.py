@@ -14,6 +14,7 @@ def make_case(case_id: str, tags: tuple[str, ...], priority: str, module: str, d
         owner="qa",
         version=1,
         preconditions=(),
+        depends_on_previous=False,
         steps=(),
         assertions=(),
         source_path=f"{case_id}.yaml",

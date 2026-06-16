@@ -10,6 +10,7 @@ owner: qa
 version: 1
 preconditions:
 - 进入会话详情
+depends_on_previous: true
 steps:
 - action: input
   target: 输入框

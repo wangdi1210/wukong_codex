@@ -15,6 +15,15 @@ def test_load_valid_case_from_directory():
     assert case.driver == "airtest"
     assert case.steps[0].action == "open_app"
     assert case.assertions
+    assert case.depends_on_previous is False
+
+
+def test_load_case_dependency_flag():
+    cases = load_cases(Path("cases"), Path("schemas/case.schema.json"))
+
+    case = next(item for item in cases if item.id == "airtest_case_20260615214104")
+
+    assert case.depends_on_previous is True
 
 
 def test_invalid_case_reports_file_and_schema_message(tmp_path):

@@ -51,6 +51,7 @@ class WebAdminService:
             tags=tuple(payload.get("tags") or ["smoke", "ai-generated"]),
             owner=payload.get("owner", "qa"),
             driver=payload.get("driver", "airtest"),
+            depends_on_previous=bool(payload.get("depends_on_previous", False)),
         )
         output = self.case_root / payload.get("folder", "smoke") / f"{case_id}.yaml"
         write_generated_case(generated, output)
@@ -68,6 +69,7 @@ class WebAdminService:
             tags=tuple(payload.get("tags") or existing.tags),
             owner=payload.get("owner", existing.owner),
             driver=payload.get("driver", existing.driver),
+            depends_on_previous=bool(payload.get("depends_on_previous", existing.depends_on_previous)),
         )
         output = Path(existing.source_path)
         write_generated_case(generated, output)
@@ -277,6 +279,7 @@ def _case_record(case: TestCase) -> dict[str, Any]:
         "owner": case.owner,
         "version": case.version,
         "source_path": case.source_path,
+        "depends_on_previous": case.depends_on_previous,
         "status": "启用",
         "created_at": _format_created_at(Path(case.source_path)),
     }
@@ -593,7 +596,7 @@ _INDEX_HTML = """<!doctype html>
           <thead>
             <tr>
               <th><input class="checkbox" type="checkbox" id="headCheck" onchange="selectAllRows(this.checked)"></th>
-              <th>ID</th><th>用例标题</th><th>模块</th><th>优先级</th><th>状态</th><th>创建时间</th><th>操作</th>
+              <th>ID</th><th>用例标题</th><th>模块</th><th>优先级</th><th>运行方式</th><th>状态</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody id="caseRows"></tbody>
@@ -657,6 +660,7 @@ _INDEX_HTML = """<!doctype html>
         <div class="field"><label>用例标题 *</label><input id="formTitle" placeholder="请输入用例标题"></div>
         <div class="field"><label>所属模块</label><input id="formModule" placeholder="例如：登录、首页、个人中心"></div>
         <div class="field"><label>优先级</label><select id="formPriority"><option value="P2">P2 - 中</option><option value="P0">P0 - 阻塞</option><option value="P1">P1 - 高</option><option value="P3">P3 - 低</option></select></div>
+        <div class="field"><label><input class="checkbox" type="checkbox" id="formDependsPrevious"> 依赖上一条用例状态</label></div>
         <div class="field"><label>前置条件</label><textarea id="formPreconditions" placeholder="执行此用例前需要满足的条件"></textarea></div>
         <div class="field"><label>测试步骤 *</label><textarea id="formSteps" placeholder="1. 打开微信&#10;2. 进入职悟空小程序&#10;3. 点击我的&#10;4. 输入手机号"></textarea></div>
         <div class="field"><label>预期结果 *</label><textarea id="formExpected" placeholder="描述期望看到的结果"></textarea></div>
@@ -736,6 +740,7 @@ _INDEX_HTML = """<!doctype html>
       document.getElementById('formTitle').value = '';
       document.getElementById('formModule').value = '';
       document.getElementById('formPriority').value = 'P2';
+      document.getElementById('formDependsPrevious').checked = false;
       document.getElementById('formPreconditions').value = '';
       document.getElementById('formSteps').value = '';
       document.getElementById('formExpected').value = '';
@@ -769,7 +774,7 @@ _INDEX_HTML = """<!doctype html>
         return;
       }
       const text = [...splitLines(document.getElementById('formPreconditions').value).map(item => `前置条件 ${item}`), ...steps, ...expected.map(item => `断言 ${item}`)].join('。');
-      const payload = { case_id: editingCaseId || caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest' };
+      const payload = { case_id: editingCaseId || caseIdFrom(title), title, module, priority: document.getElementById('formPriority').value, tags: ['smoke'], text, driver: 'airtest', depends_on_previous: document.getElementById('formDependsPrevious').checked };
       try {
         if (editingCaseId) {
           await api(`/api/cases/${encodeURIComponent(editingCaseId)}`, { method: 'PUT', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload) });
@@ -792,6 +797,7 @@ _INDEX_HTML = """<!doctype html>
         document.getElementById('formTitle').value = data.title || '';
         document.getElementById('formModule').value = data.module || '';
         document.getElementById('formPriority').value = data.priority || 'P2';
+        document.getElementById('formDependsPrevious').checked = !!data.depends_on_previous;
         document.getElementById('formPreconditions').value = (data.preconditions || []).join('\\n');
         document.getElementById('formSteps').value = data.natural_steps || '';
         document.getElementById('formExpected').value = data.natural_expected || '';
@@ -826,7 +832,7 @@ _INDEX_HTML = """<!doctype html>
         renderCaseTable();
         renderMetrics();
       } catch (error) {
-        document.getElementById('caseRows').innerHTML = `<tr><td colspan="8" class="empty">加载用例失败：${escapeHtml(error.message)}</td></tr>`;
+        document.getElementById('caseRows').innerHTML = `<tr><td colspan="9" class="empty">加载用例失败：${escapeHtml(error.message)}</td></tr>`;
         toast(`加载用例失败：${error.message}`);
       }
     }
@@ -853,12 +859,13 @@ _INDEX_HTML = """<!doctype html>
           <td>${escapeHtml(item.title)}</td>
           <td>${escapeHtml(item.module)}</td>
           <td><span class="tag tag-${priorityClass}">${escapeHtml(item.priority)}</span></td>
+          <td>${item.depends_on_previous ? '<span class="tag">依赖上一条</span>' : '<span class="tag status-on">独立运行</span>'}</td>
           <td><span class="tag status-on">${escapeHtml(item.status)}</span></td>
           <td>${escapeHtml(item.created_at)}</td>
           <td><button class="btn text" onclick="editCase('${idArg}')">编辑</button><button class="btn text" onclick="deleteCase('${idArg}')">删除</button></td>
         </tr>`;
       }).join('');
-      document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无用例</td></tr>';
+      document.getElementById('caseRows').innerHTML = rows || '<tr><td colspan="9" class="empty">暂无用例</td></tr>';
       document.getElementById('headCheck').checked = filteredCases().length > 0 && filteredCases().every(item => selectedIds.has(item.id));
       savePageState();
     }
@@ -940,7 +947,7 @@ _INDEX_HTML = """<!doctype html>
       }
       cases.forEach(item => {
         lines.push(`用例：${item.case_id} | ${item.title || ''} | ${item.status}`);
-        lines.push(`模块：${item.module || '-'}，优先级：${item.priority || '-'}，标签：${(item.tags || []).join(', ') || '-'}`);
+        lines.push(`模块：${item.module || '-'}，优先级：${item.priority || '-'}，运行方式：${item.depends_on_previous ? '依赖上一条' : '独立运行'}，标签：${(item.tags || []).join(', ') || '-'}`);
         (item.steps || []).forEach((step, index) => {
           lines.push(`  #${index + 1} [${step.status}] ${step.action} ${step.target}`);
           if (step.message) lines.push(`      message: ${step.message}`);

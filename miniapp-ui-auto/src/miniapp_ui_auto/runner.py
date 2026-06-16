@@ -4,7 +4,7 @@ from pathlib import Path
 
 from miniapp_ui_auto.ai.failure_analyzer import classify_failure
 from miniapp_ui_auto.drivers.base import AutomationDriver
-from miniapp_ui_auto.models import CaseResult, RunContext, StepResult, TestCase
+from miniapp_ui_auto.models import CaseResult, RunContext, Step, StepResult, TestCase
 from miniapp_ui_auto.reporter import RunSummary, write_summary
 
 
@@ -31,6 +31,14 @@ def _run_case(case: TestCase, driver: AutomationDriver) -> CaseResult:
         step_results.append(result)
         if result.status == "failed":
             break
+    if not any(item.status == "failed" for item in step_results):
+        for assertion in case.assertions:
+            result = driver.execute_step(
+                Step(action=f"assert_{assertion.type}", target=assertion.target, value=assertion.expected)
+            )
+            step_results.append(result)
+            if result.status == "failed":
+                break
 
     failed_messages = [item.message for item in step_results if item.status == "failed"]
     if failed_messages:
@@ -47,6 +55,7 @@ def _run_case(case: TestCase, driver: AutomationDriver) -> CaseResult:
         module=case.module,
         priority=case.priority,
         tags=case.tags,
+        depends_on_previous=case.depends_on_previous,
         status=status,
         steps=tuple(step_results),
         failure_category=category,

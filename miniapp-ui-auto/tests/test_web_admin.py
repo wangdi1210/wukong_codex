@@ -34,6 +34,7 @@ def test_web_admin_generates_lists_runs_and_reports(tmp_path):
             "title": "手机号验证码登录成功",
             "module": "login",
             "tags": ["smoke", "web"],
+            "depends_on_previous": True,
             "text": "打开 微信。进入 职悟空小程序。点击 我的。输入 手机号输入框：13800000000。断言 用户昵称",
         }
     )
@@ -44,6 +45,7 @@ def test_web_admin_generates_lists_runs_and_reports(tmp_path):
     assert generated["path"].endswith("web_login_001.yaml")
     assert cases[0]["id"] == "web_login_001"
     assert cases[0]["driver"] == "airtest"
+    assert cases[0]["depends_on_previous"] is True
     assert run_result["total"] == 1
     assert latest["passed"] == 1
     assert "本次回归共执行 1 条" in latest["ai_summary"]
@@ -96,6 +98,7 @@ def test_web_admin_can_get_update_and_delete_case(tmp_path):
             "module": "profile",
             "priority": "P1",
             "tags": ["smoke"],
+            "depends_on_previous": True,
             "text": "前置条件 用户已登录。点击 个人中心。断言 资料页",
         },
     )
@@ -106,6 +109,7 @@ def test_web_admin_can_get_update_and_delete_case(tmp_path):
     assert updated["case"]["title"] == "编辑后标题"
     assert updated_detail["module"] == "profile"
     assert updated_detail["priority"] == "P1"
+    assert updated_detail["depends_on_previous"] is True
     assert updated_detail["natural_expected"] == "资料页"
     assert deleted["deleted"] == "editable_case"
     assert service.list_cases() == []

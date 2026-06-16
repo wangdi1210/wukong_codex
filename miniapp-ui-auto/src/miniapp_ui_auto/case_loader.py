@@ -78,6 +78,7 @@ def _to_case(raw: dict[str, Any], source_path: Path) -> TestCase:
         owner=raw["owner"],
         version=raw["version"],
         preconditions=tuple(raw.get("preconditions", [])),
+        depends_on_previous=bool(raw.get("depends_on_previous", False)),
         steps=steps,
         assertions=assertions,
         source_path=str(source_path),
