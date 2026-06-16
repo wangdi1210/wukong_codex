@@ -5,6 +5,7 @@ import subprocess
 import time
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 import xml.etree.ElementTree as ET
@@ -138,17 +139,13 @@ class AirtestDriver(AutomationDriver):
         miniapp_name = (target or self.config.miniapp_name).strip()
         if not miniapp_name:
             raise ValueError("search_miniapp requires a miniapp name.")
-        if self._tap_recent_miniapp(miniapp_name):
-            time.sleep(1)
-            return f"opened recent miniapp {miniapp_name}"
-        # 最近列表找不到目标时，再进入搜索框输入小程序名称。
-        self._focus_miniapp_search_box()
+        search_box_source = self._focus_miniapp_search_box()
         time.sleep(0.5)
         self._input_search_text(miniapp_name)
         time.sleep(1)
-        self._tap_miniapp_search_result(miniapp_name)
+        result_source = self._tap_miniapp_search_result(miniapp_name)
         time.sleep(1)
-        return f"searched miniapp {miniapp_name}"
+        return f"searched miniapp {miniapp_name}; search_box={search_box_source}; result={result_source}"
 
     def _tap_recent_miniapp(self, miniapp_name: str) -> bool:
         if self._poco is not None:
@@ -165,13 +162,18 @@ class AirtestDriver(AutomationDriver):
         self._touch_ratio(coordinate)
         return True
 
-    def _focus_miniapp_search_box(self) -> None:
+    def _focus_miniapp_search_box(self) -> str:
+        visual_point = self._find_visual_search_box_center()
+        if visual_point is not None:
+            self._touch_absolute(visual_point)
+            return "visual_search_box"
         if self._tap_by_uiautomator_text(("搜索小程序", "搜索", "搜一搜")):
-            return
-        # 微信下拉搜索页的输入框在顶部，不同机型状态栏高度略有差异，连续点两个顶部候选位置。
-        self._touch_ratio((0.5, 0.07))
+            return "uiautomator_text"
+        # 微信下拉搜索页的输入框在“最近”标题下方，不同机型状态栏高度略有差异，连续点两个候选位置。
+        self._touch_ratio((0.5, 0.13))
         time.sleep(0.3)
-        self._touch_ratio((0.5, 0.095))
+        self._touch_ratio((0.5, 0.145))
+        return "coordinate_fallback"
 
     def _tap_by_uiautomator_text(self, keywords: tuple[str, ...]) -> bool:
         xml_text = self._dump_ui_xml()
@@ -204,14 +206,83 @@ class AirtestDriver(AutomationDriver):
             return ""
         return ""
 
-    def _tap_miniapp_search_result(self, miniapp_name: str) -> None:
+    def _tap_miniapp_search_result(self, miniapp_name: str) -> str:
+        template_point = self._find_template_center(miniapp_name)
+        if template_point is not None:
+            self._touch_absolute(template_point)
+            return "visual_template"
+        ocr_point = self._find_ocr_text_center(miniapp_name)
+        if ocr_point is not None:
+            self._touch_absolute(ocr_point)
+            return "visual_ocr"
         if self._poco is not None:
             try:
                 self._poco(text=miniapp_name).click()
-                return
+                return "poco_text"
             except Exception:
                 pass
+        if self._tap_by_uiautomator_exact_text(miniapp_name):
+            return "uiautomator_text"
+        first_result_point = self._find_visual_first_result_center()
+        if first_result_point is not None:
+            self._touch_absolute(first_result_point)
+            return "visual_first_result"
         self._touch_ratio((0.5, 0.23))
+        return "coordinate_fallback"
+
+    def _find_visual_search_box_center(self) -> tuple[int, int] | None:
+        image_path = self._snapshot_for_visual("search_box")
+        if image_path is None:
+            return None
+        return _find_search_box_center(image_path)
+
+    def _find_visual_first_result_center(self) -> tuple[int, int] | None:
+        image_path = self._snapshot_for_visual("first_result")
+        if image_path is None:
+            return None
+        search_box = _find_search_box_center(image_path)
+        if search_box is None:
+            return None
+        width, height = self._screen_size()
+        x, y = search_box
+        return x, min(int(height * 0.9), y + int(height * 0.14))
+
+    def _find_template_center(self, target: str) -> tuple[int, int] | None:
+        image_path = self._image_path(target)
+        if image_path is None:
+            return None
+        screen_path = self._snapshot_for_visual("template")
+        if screen_path is not None:
+            point = _match_template_center(screen_path, image_path, self.config.image_threshold)
+            if point is not None:
+                return point
+        try:
+            template = self._template_factory(str(image_path), threshold=self.config.image_threshold)
+            point = self._airtest_api.exists(template)
+        except Exception:
+            return None
+        if isinstance(point, (tuple, list)) and len(point) >= 2:
+            return int(point[0]), int(point[1])
+        return None
+
+    def _find_ocr_text_center(self, text: str) -> tuple[int, int] | None:
+        image_path = self._snapshot_for_visual("ocr")
+        if image_path is None:
+            return None
+        return _find_text_center_by_ocr(image_path, text)
+
+    def _snapshot_for_visual(self, name: str) -> Path | None:
+        artifact_dir = Path("reports") / "artifacts" / "visual"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        image_path = artifact_dir / f"{name}_{timestamp}.png"
+        try:
+            self._airtest_api.snapshot(filename=str(image_path))
+        except Exception:
+            return None
+        if image_path.exists():
+            return image_path
+        return None
 
     def _input_search_text(self, value: str) -> None:
         self._input_text(value, editor_code="3")
@@ -269,6 +340,9 @@ class AirtestDriver(AutomationDriver):
 
     def _touch_ratio(self, point: tuple[float, float]) -> None:
         self._airtest_api.touch(self._point(point))
+
+    def _touch_absolute(self, point: tuple[int, int]) -> None:
+        self._airtest_api.touch([int(point[0]), int(point[1])])
 
     def _point(self, point: tuple[float, float]) -> tuple[int, int]:
         x, y = point
@@ -372,6 +446,144 @@ def _known_recent_miniapp_coordinate(value: str) -> tuple[float, float] | None:
         "职悟空": (0.16, 0.28),
     }
     return known_targets.get(value)
+
+
+def _find_search_box_center(image_path: Path) -> tuple[int, int] | None:
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError:
+        return None
+    image = cv2.imread(str(image_path))
+    if image is None:
+        image = _read_cv_image(image_path)
+    if image is None:
+        return None
+    height, width = image.shape[:2]
+    top_region = image[: int(height * 0.32), :]
+    gray = cv2.cvtColor(top_region, cv2.COLOR_BGR2GRAY)
+    circles = cv2.HoughCircles(
+        gray,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=max(40, int(width * 0.05)),
+        param1=50,
+        param2=18,
+        minRadius=max(10, int(width * 0.012)),
+        maxRadius=max(28, int(width * 0.035)),
+    )
+    if circles is not None:
+        circle_candidates: list[tuple[int, int, int]] = []
+        for x, y, radius in np.round(circles[0]).astype(int):
+            if width * 0.2 <= x <= width * 0.65 and height * 0.08 <= y <= height * 0.2:
+                circle_candidates.append((x, y, radius))
+        if circle_candidates:
+            x, y, _ = sorted(circle_candidates, key=lambda item: (item[1], item[0]))[0]
+            return width // 2, y
+
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    mask = cv2.inRange(blurred, 45, 170)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((11, 45), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: list[tuple[int, int, int, int]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < width * 0.35 or h < height * 0.025:
+            continue
+        if h > height * 0.12 or y < height * 0.08 or y > height * 0.2:
+            continue
+        candidates.append((x, y, w, h))
+    if not candidates:
+        return None
+    x, y, w, h = sorted(candidates, key=lambda item: (item[1], -item[2]))[0]
+    return x + w // 2, y + h // 2
+
+
+def _find_text_center_by_ocr(image_path: Path, text: str) -> tuple[int, int] | None:
+    try:
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+    except ImportError:
+        return None
+    try:
+        image = Image.open(image_path)
+    except OSError:
+        return None
+    for lang in ("chi_sim+eng", "eng"):
+        try:
+            data = pytesseract.image_to_data(image, lang=lang, output_type=pytesseract.Output.DICT)
+        except Exception:
+            continue
+        point = _ocr_data_text_center(data, text)
+        if point is not None:
+            return point
+    return None
+
+
+def _match_template_center(screen_path: Path, template_path: Path, threshold: float) -> tuple[int, int] | None:
+    try:
+        import cv2  # type: ignore
+    except ImportError:
+        return None
+    screen = _read_cv_image(screen_path)
+    template = _read_cv_image(template_path)
+    if screen is None or template is None:
+        return None
+    if screen.shape[0] < template.shape[0] or screen.shape[1] < template.shape[1]:
+        return None
+    result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
+    _, max_value, _, max_location = cv2.minMaxLoc(result)
+    if max_value < threshold:
+        return None
+    x, y = max_location
+    height, width = template.shape[:2]
+    return x + width // 2, y + height // 2
+
+
+def _read_cv_image(image_path: Path) -> Any | None:
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError:
+        return None
+    try:
+        data = np.fromfile(str(image_path), dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def _ocr_data_text_center(data: dict[str, list[Any]], expected: str) -> tuple[int, int] | None:
+    words = data.get("text", [])
+    lefts = data.get("left", [])
+    tops = data.get("top", [])
+    widths = data.get("width", [])
+    heights = data.get("height", [])
+    expected_compact = _compact_text(expected)
+    candidates: list[tuple[int, int, int, int]] = []
+    for index, word in enumerate(words):
+        if expected_compact not in _compact_text(str(word)):
+            continue
+        try:
+            left = int(lefts[index])
+            top = int(tops[index])
+            width = int(widths[index])
+            height = int(heights[index])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if width <= 0 or height <= 0:
+            continue
+        candidates.append((left, top, width, height))
+    if not candidates:
+        return None
+    left, top, width, height = sorted(candidates, key=lambda item: (item[1], item[0]))[0]
+    return left + width // 2, top + height // 2
+
+
+def _compact_text(value: str) -> str:
+    return re.sub(r"\s+", "", value).strip().lower()
 
 
 def _bounds_center_for_keywords(xml_text: str, keywords: tuple[str, ...]) -> tuple[int, int] | None:

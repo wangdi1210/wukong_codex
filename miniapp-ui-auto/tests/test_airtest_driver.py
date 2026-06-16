@@ -255,8 +255,8 @@ def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monk
     result = driver.execute_step(Step(action="search_miniapp", target="测试小程序"))
 
     assert result.status == "passed"
-    assert ("touch", (500, 140)) in fake_api.calls
-    assert ("touch", (500, 190)) in fake_api.calls
+    assert ("touch", (500, 260)) in fake_api.calls
+    assert ("touch", (500, 290)) in fake_api.calls
     assert ("yosemite_text", "测试小程序") in fake_api.calls
     assert ("touch", (500, 460)) in fake_api.calls
 
@@ -286,7 +286,7 @@ def test_airtest_driver_focuses_search_box_by_uiautomator_bounds(tmp_path, monke
     assert ("touch", (500, 140)) not in fake_api.calls
 
 
-def test_airtest_driver_opens_recent_miniapp_before_searching(tmp_path, monkeypatch):
+def test_airtest_driver_searches_even_when_recent_list_contains_target(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(
         "airtest:\n"
@@ -307,12 +307,11 @@ def test_airtest_driver_opens_recent_miniapp_before_searching(tmp_path, monkeypa
     result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
 
     assert result.status == "passed"
-    assert result.message == "opened recent miniapp 职悟空"
-    assert ("touch", (150, 620)) in fake_api.calls
-    assert ("yosemite_text", "职悟空") not in fake_api.calls
+    assert "searched miniapp 职悟空" in result.message
+    assert ("yosemite_text", "职悟空") in fake_api.calls
 
 
-def test_airtest_driver_opens_known_recent_miniapp_by_visual_coordinate(tmp_path, monkeypatch):
+def test_airtest_driver_prefers_visual_search_box_and_ocr_result(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(
         "airtest:\n"
@@ -323,15 +322,19 @@ def test_airtest_driver_opens_known_recent_miniapp_by_visual_coordinate(tmp_path
     fake_api = FakeAirtestApi()
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_find_visual_search_box_center", lambda self: (420, 260))
+    monkeypatch.setattr(AirtestDriver, "_find_ocr_text_center", lambda self, text: (360, 520))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
     result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
 
     assert result.status == "passed"
-    assert result.message == "opened recent miniapp 职悟空"
-    assert ("touch", (160, 560)) in fake_api.calls
-    assert ("yosemite_text", "职悟空") not in fake_api.calls
+    assert "search_box=visual_search_box" in result.message
+    assert "result=visual_ocr" in result.message
+    assert ("touch", [420, 260]) in fake_api.calls
+    assert ("touch", [360, 520]) in fake_api.calls
+    assert ("yosemite_text", "职悟空") in fake_api.calls
 
 
 def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monkeypatch):
