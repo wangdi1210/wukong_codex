@@ -145,6 +145,7 @@ class AirtestDriver(AutomationDriver):
         time.sleep(1)
         result_source = self._tap_miniapp_search_result(miniapp_name)
         time.sleep(1)
+        self._assert_foreground_package()
         return f"searched miniapp {miniapp_name}; search_box={search_box_source}; result={result_source}"
 
     def _tap_recent_miniapp(self, miniapp_name: str) -> bool:
@@ -163,17 +164,84 @@ class AirtestDriver(AutomationDriver):
         return True
 
     def _focus_miniapp_search_box(self) -> str:
-        visual_point = self._find_visual_search_box_center()
+        visual_point = self._wait_visual_search_box_center(timeout_seconds=2)
         if visual_point is not None:
             self._touch_absolute(visual_point)
             return "visual_search_box"
+        panel_source = self._enter_miniapp_search_panel()
+        visual_point = self._wait_visual_search_box_center(timeout_seconds=4)
+        if visual_point is not None:
+            self._touch_absolute(visual_point)
+            return f"{panel_source}+visual_search_box"
         if self._tap_by_uiautomator_text(("搜索小程序", "搜索", "搜一搜")):
-            return "uiautomator_text"
-        # 微信下拉搜索页的输入框在“最近”标题下方，不同机型状态栏高度略有差异，连续点两个候选位置。
-        self._touch_ratio((0.5, 0.13))
-        time.sleep(0.3)
-        self._touch_ratio((0.5, 0.145))
-        return "coordinate_fallback"
+            return f"{panel_source}+uiautomator_text"
+        raise RuntimeError(
+            "未检测到微信小程序搜索页。已尝试拉起微信首页并慢速下拉，但没有通过视觉识别找到“搜索小程序”输入框，"
+            "为避免跑到公众号/服务号搜索，本步骤已停止。请确认当前微信是否在首页聊天列表，或重新执行。"
+        )
+
+    def _wait_visual_search_box_center(self, timeout_seconds: float) -> tuple[int, int] | None:
+        deadline = time.time() + timeout_seconds
+        while True:
+            point = self._find_visual_search_box_center()
+            if point is not None:
+                return point
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.5)
+
+    def _enter_miniapp_search_panel(self) -> str:
+        sources: list[str] = []
+        for attempt in range(3):
+            self._open_wechat_launcher()
+            sources.append("launcher")
+            time.sleep(0.8)
+            self._slow_pull_down()
+            sources.append("slow_pull_down")
+            if self._wait_visual_search_box_center(timeout_seconds=2) is not None:
+                return "+".join(sources)
+        return "+".join(sources)
+
+    def _open_wechat_launcher(self) -> None:
+        try:
+            self._airtest_api.device().adb.shell(
+                ["am", "start", "-n", f"{self.config.package}/.ui.LauncherUI"]
+            )
+            return
+        except Exception:
+            pass
+        try:
+            self._airtest_api.start_app(self.config.package)
+        except Exception:
+            pass
+
+    def _press_back(self) -> None:
+        try:
+            self._airtest_api.keyevent("BACK")
+            return
+        except Exception:
+            pass
+        try:
+            self._airtest_api.device().adb.shell(["input", "keyevent", "BACK"])
+        except Exception:
+            pass
+
+    def _slow_pull_down(self) -> None:
+        start = self._point((0.5, 0.24))
+        end = self._point((0.5, 0.78))
+        try:
+            self._airtest_api.swipe(start, end, duration=1.2)
+            return
+        except Exception:
+            pass
+        try:
+            self._airtest_api.device().adb.shell(
+                ["input", "swipe", str(start[0]), str(start[1]), str(end[0]), str(end[1]), "1200"]
+            )
+            return
+        except Exception:
+            pass
+        self._airtest_api.swipe(start, end)
 
     def _tap_by_uiautomator_text(self, keywords: tuple[str, ...]) -> bool:
         xml_text = self._dump_ui_xml()
@@ -227,20 +295,21 @@ class AirtestDriver(AutomationDriver):
         if first_result_point is not None:
             self._touch_absolute(first_result_point)
             return "visual_first_result"
-        self._touch_ratio((0.5, 0.23))
-        return "coordinate_fallback"
+        raise RuntimeError(
+            f"未检测到“{miniapp_name}”的小程序搜索结果页。为避免误点公众号、聊天页或外部应用，本步骤未执行坐标兜底。"
+        )
 
     def _find_visual_search_box_center(self) -> tuple[int, int] | None:
         image_path = self._snapshot_for_visual("search_box")
         if image_path is None:
             return None
-        return _find_search_box_center(image_path)
+        return _find_search_box_center(image_path, require_dark_panel=True)
 
     def _find_visual_first_result_center(self) -> tuple[int, int] | None:
         image_path = self._snapshot_for_visual("first_result")
         if image_path is None:
             return None
-        search_box = _find_search_box_center(image_path)
+        search_box = _find_search_box_center(image_path, require_dark_panel=False)
         if search_box is None:
             return None
         width, height = self._screen_size()
@@ -286,6 +355,28 @@ class AirtestDriver(AutomationDriver):
 
     def _input_search_text(self, value: str) -> None:
         self._input_text(value, editor_code="3")
+
+    def _assert_foreground_package(self) -> None:
+        current_package = self._current_foreground_package()
+        if current_package and current_package != self.config.package:
+            raise RuntimeError(
+                f"执行后前台应用不是微信：current_package={current_package}，expected={self.config.package}。"
+            )
+
+    def _current_foreground_package(self) -> str:
+        try:
+            output = str(
+                self._airtest_api.device().adb.shell(["dumpsys", "window", "windows"]) or ""
+            )
+        except Exception:
+            return ""
+        match = re.search(r"mCurrentFocus=Window\{[^ ]+ [^ ]+ ([^/]+)/", output)
+        if match:
+            return match.group(1)
+        match = re.search(r"mFocusedApp=.* ([^/]+)/", output)
+        if match:
+            return match.group(1)
+        return ""
 
     def _input_text(self, value: str, *, submit: bool = False, editor_code: str | None = None) -> None:
         if _has_non_ascii(value):
@@ -448,7 +539,7 @@ def _known_recent_miniapp_coordinate(value: str) -> tuple[float, float] | None:
     return known_targets.get(value)
 
 
-def _find_search_box_center(image_path: Path) -> tuple[int, int] | None:
+def _find_search_box_center(image_path: Path, *, require_dark_panel: bool = False) -> tuple[int, int] | None:
     try:
         import cv2  # type: ignore
         import numpy as np  # type: ignore
@@ -462,6 +553,8 @@ def _find_search_box_center(image_path: Path) -> tuple[int, int] | None:
     height, width = image.shape[:2]
     top_region = image[: int(height * 0.32), :]
     gray = cv2.cvtColor(top_region, cv2.COLOR_BGR2GRAY)
+    if require_dark_panel and float(gray.mean()) > 130:
+        return None
     circles = cv2.HoughCircles(
         gray,
         cv2.HOUGH_GRADIENT,

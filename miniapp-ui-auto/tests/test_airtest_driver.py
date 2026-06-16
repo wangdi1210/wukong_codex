@@ -27,8 +27,8 @@ class FakeAirtestApi:
     def keyevent(self, value):
         self.calls.append(("keyevent", value))
 
-    def swipe(self, start, end):
-        self.calls.append(("swipe", start, end))
+    def swipe(self, start, end, **kwargs):
+        self.calls.append(("swipe", start, end, kwargs))
 
     def exists(self, target):
         self.calls.append(("exists", target))
@@ -235,7 +235,7 @@ def test_airtest_driver_executes_swipe_direction(tmp_path, monkeypatch):
     result = driver.execute_step(Step(action="swipe", target="down"))
 
     assert result.status == "passed"
-    assert ("swipe", (500, 700), (500, 1500)) in fake_api.calls
+    assert ("swipe", (500, 700), (500, 1500), {}) in fake_api.calls
 
 
 def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monkeypatch):
@@ -249,16 +249,17 @@ def test_airtest_driver_searches_miniapp_without_poco_text_lookup(tmp_path, monk
     fake_api = FakeAirtestApi()
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: (420, 260))
+    monkeypatch.setattr(AirtestDriver, "_find_visual_first_result_center", lambda self: (500, 460))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
     result = driver.execute_step(Step(action="search_miniapp", target="测试小程序"))
 
     assert result.status == "passed"
-    assert ("touch", (500, 260)) in fake_api.calls
-    assert ("touch", (500, 290)) in fake_api.calls
+    assert ("touch", [420, 260]) in fake_api.calls
     assert ("yosemite_text", "测试小程序") in fake_api.calls
-    assert ("touch", (500, 460)) in fake_api.calls
+    assert ("touch", [500, 460]) in fake_api.calls
 
 
 def test_airtest_driver_focuses_search_box_by_uiautomator_bounds(tmp_path, monkeypatch):
@@ -276,6 +277,8 @@ def test_airtest_driver_focuses_search_box_by_uiautomator_bounds(tmp_path, monke
     fake_api = FakeAirtestApi(ui_xml=ui_xml)
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: None)
+    monkeypatch.setattr(AirtestDriver, "_find_visual_first_result_center", lambda self: (500, 460))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
@@ -301,6 +304,8 @@ def test_airtest_driver_searches_even_when_recent_list_contains_target(tmp_path,
     fake_api = FakeAirtestApi(ui_xml=ui_xml)
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: (420, 260))
+    monkeypatch.setattr(AirtestDriver, "_find_visual_first_result_center", lambda self: (500, 460))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
@@ -322,7 +327,7 @@ def test_airtest_driver_prefers_visual_search_box_and_ocr_result(tmp_path, monke
     fake_api = FakeAirtestApi()
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
-    monkeypatch.setattr(AirtestDriver, "_find_visual_search_box_center", lambda self: (420, 260))
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: (420, 260))
     monkeypatch.setattr(AirtestDriver, "_find_ocr_text_center", lambda self, text: (360, 520))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
     driver.setup(RunContext(env="test", trigger="pytest"))
@@ -337,6 +342,62 @@ def test_airtest_driver_prefers_visual_search_box_and_ocr_result(tmp_path, monke
     assert ("yosemite_text", "职悟空") in fake_api.calls
 
 
+def test_airtest_driver_recovers_miniapp_panel_before_searching(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+    wait_results = iter([None, None, (420, 260), (420, 260)])
+
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        AirtestDriver,
+        "_wait_visual_search_box_center",
+        lambda self, timeout_seconds: next(wait_results),
+    )
+    monkeypatch.setattr(AirtestDriver, "_find_visual_first_result_center", lambda self: (500, 460))
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
+
+    assert result.status == "passed"
+    assert "search_box=launcher+slow_pull_down+launcher+slow_pull_down+visual_search_box" in result.message
+    assert ("swipe", (500, 480), (500, 1560), {"duration": 1.2}) in fake_api.calls
+    assert ("keyevent", "BACK") not in fake_api.calls
+    assert ("touch", [420, 260]) in fake_api.calls
+    assert ("yosemite_text", "职悟空") in fake_api.calls
+
+
+def test_airtest_driver_stops_when_miniapp_panel_is_not_detected(tmp_path, monkeypatch):
+    config_path = tmp_path / "airtest.yaml"
+    config_path.write_text(
+        "airtest:\n"
+        "  poco:\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+    fake_api = FakeAirtestApi()
+
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
+    monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: None)
+    driver = AirtestDriver(config_path=config_path, airtest_api=fake_api)
+    driver.setup(RunContext(env="test", trigger="pytest"))
+
+    result = driver.execute_step(Step(action="search_miniapp", target="职悟空"))
+
+    assert result.status == "failed"
+    assert "未检测到微信小程序搜索页" in result.message
+    assert ("touch", (500, 260)) not in fake_api.calls
+    assert ("yosemite_text", "职悟空") not in fake_api.calls
+
+
 def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monkeypatch):
     config_path = tmp_path / "airtest.yaml"
     config_path.write_text(
@@ -349,6 +410,7 @@ def test_airtest_driver_prefers_poco_search_result_when_available(tmp_path, monk
     fake_poco = FakePoco()
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.resolve_adb_device_uri", lambda: "")
     monkeypatch.setattr("miniapp_ui_auto.drivers.airtest_driver.time.sleep", lambda _: None)
+    monkeypatch.setattr(AirtestDriver, "_wait_visual_search_box_center", lambda self, timeout_seconds: (420, 260))
     driver = AirtestDriver(config_path=config_path, airtest_api=fake_api, poco_factory=lambda: fake_poco)
     driver.setup(RunContext(env="test", trigger="pytest"))
 
